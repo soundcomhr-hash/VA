@@ -213,22 +213,28 @@ function setupRecording() {
     }
   });
 
+  // TEST BUILD (v5): audio recording temporarily disabled to confirm the
+  // Android mic contention between MediaRecorder and SpeechRecognition.
+  const RECORD_AUDIO = false;
+
   async function startRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioChunks = [];
-      currentAudioBlob = null;
-      currentAudioMime = 'audio/webm';
-      mediaRecorder = new MediaRecorder(stream);
-      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
-      mediaRecorder.onstop = () => {
-        currentAudioBlob = new Blob(audioChunks, { type: currentAudioMime });
-        stream.getTracks().forEach((t) => t.stop());
-      };
-      mediaRecorder.start();
-    } catch (err) {
-      micStatus.textContent = 'לא ניתן לגשת למיקרופון - צריך לאשר הרשאה';
-      return;
+    if (RECORD_AUDIO) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunks = [];
+        currentAudioBlob = null;
+        currentAudioMime = 'audio/webm';
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+        mediaRecorder.onstop = () => {
+          currentAudioBlob = new Blob(audioChunks, { type: currentAudioMime });
+          stream.getTracks().forEach((t) => t.stop());
+        };
+        mediaRecorder.start();
+      } catch (err) {
+        micStatus.textContent = 'לא ניתן לגשת למיקרופון - צריך לאשר הרשאה';
+        return;
+      }
     }
 
     finalTranscript = transcriptBox.value ? transcriptBox.value + ' ' : '';
