@@ -142,7 +142,77 @@ function setupTabs() {
       document.querySelectorAll('.tab-panel').forEach((p) => (p.hidden = true));
       document.getElementById('tab-' + btn.dataset.tab).hidden = false;
       if (btn.dataset.tab === 'inbox') loadInbox();
+      if (btn.dataset.tab === 'today') loadToday();
     });
+  });
+}
+
+// ---------- היום (today) screen ----------
+function setTodayStatus(msg) {
+  document.getElementById('todayStatus').textContent = msg;
+}
+
+async function loadToday() {
+  const list = document.getElementById('todayList');
+  document.getElementById('todayTitle').textContent =
+    new Date().toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
+  if (!settings.endpoint) {
+    list.innerHTML = '';
+    setTodayStatus('עדיין לא הוגדר שרת (⚙ למעלה).');
+    return;
+  }
+  if (!navigator.onLine) {
+    setTodayStatus('אין חיבור לאינטרנט - נסו שוב כשיש קליטה.');
+    return;
+  }
+  setTodayStatus('טוען את הלו"ז...');
+  try {
+    const result = await apiPost('today');
+    if (!result.ok) throw new Error(result.error);
+    renderToday(result.events);
+  } catch (err) {
+    setTodayStatus('שגיאה בטעינה מהיומן. נסו לרענן.');
+  }
+}
+
+function renderToday(events) {
+  const list = document.getElementById('todayList');
+  list.innerHTML = '';
+  if (!events.length) {
+    setTodayStatus('אין אירועים ביומן היום 🎉');
+    return;
+  }
+  setTodayStatus('');
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+  const toMinutes = (hhmm) => parseInt(hhmm.slice(0, 2), 10) * 60 + parseInt(hhmm.slice(3), 10);
+
+  events.forEach((ev) => {
+    const card = document.createElement('div');
+    card.className = 'today-event';
+    if (!ev.allDay) {
+      if (toMinutes(ev.end) < nowMinutes) card.classList.add('past');
+      else if (toMinutes(ev.start) <= nowMinutes) card.classList.add('current');
+    }
+
+    const time = document.createElement('div');
+    time.className = 'event-time';
+    time.textContent = ev.allDay ? 'כל היום' : ev.start + '–' + ev.end;
+    card.appendChild(time);
+
+    const body = document.createElement('div');
+    body.className = 'event-body';
+    const title = document.createElement('div');
+    title.className = 'event-title';
+    title.textContent = ev.title || '(ללא כותרת)';
+    body.appendChild(title);
+    if (ev.location) {
+      const loc = document.createElement('div');
+      loc.className = 'event-location';
+      loc.textContent = '📍 ' + ev.location;
+      body.appendChild(loc);
+    }
+    card.appendChild(body);
+    list.appendChild(card);
   });
 }
 
@@ -530,6 +600,7 @@ function registerServiceWorker() {
 
 // ---------- Init ----------
 document.getElementById('inboxRefresh').addEventListener('click', loadInbox);
+document.getElementById('todayRefresh').addEventListener('click', loadToday);
 
 setupTabs();
 setupSettings();

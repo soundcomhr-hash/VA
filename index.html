@@ -14,7 +14,7 @@
 <div id="app">
 
   <header class="app-header">
-    <h1>העוזרת <span class="app-version">ג9</span></h1>
+    <h1>העוזרת <span class="app-version">ג10</span></h1>
     <div class="header-right">
       <span id="connStatus" class="conn-status">●</span>
       <button id="settingsBtn" class="icon-btn" aria-label="הגדרות">⚙</button>
@@ -56,9 +56,12 @@
     </section>
 
     <section id="tab-today" class="tab-panel" hidden>
-      <div class="placeholder-panel">
-        <p>מסך "היום" ייבנה בשלב הבא (חיבור ליומן).</p>
+      <div class="inbox-toolbar">
+        <h2 id="todayTitle" class="today-title"></h2>
+        <button id="todayRefresh" class="btn btn-secondary">🔄 רענן</button>
       </div>
+      <div id="todayStatus" class="inbox-status"></div>
+      <div id="todayList" class="today-list"></div>
     </section>
 
   </main>

@@ -266,6 +266,66 @@ main {
   color: var(--accent-light);
 }
 
+.today-title {
+  font-size: 16px;
+  margin: 0;
+  color: var(--text-dim);
+  font-weight: normal;
+}
+
+.today-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.today-event {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid #274741;
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.today-event .event-time {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-light);
+  white-space: nowrap;
+  direction: ltr;
+}
+
+.today-event .event-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.today-event .event-title {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.today-event .event-location {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.today-event.past {
+  opacity: 0.45;
+}
+
+.today-event.current {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 1px var(--ok);
+}
+
+.today-event.current .event-time {
+  color: var(--ok);
+}
+
 .audio-btn {
   margin-top: 14px;
   background: none;

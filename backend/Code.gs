@@ -500,6 +500,9 @@ function inboxConfirm_(id) {
       location: parsed.place || '',
       description: 'נוצר על ידי העוזרת מתוך: "' + (parsed.text || '') + '"',
     });
+    // Reminders pop on the phone: at the moment itself for תזכורת,
+    // 30 minutes ahead for a meeting.
+    event.addPopupReminder(parsed.kind === 'תזכורת' ? 0 : 30);
     eventLink = 'נוצר אירוע: ' + parsed.title + ' — ' + parsed.dateHuman + ' ' + parsed.time;
   }
 
