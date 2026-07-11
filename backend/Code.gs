@@ -229,18 +229,21 @@ function parseHebrew_(text) {
     title: buildTitle_(kind, clean, person, place),
   };
 
+  return finalizeParse_(result);
+}
+
+function finalizeParse_(result) {
   var missing = [];
-  if (kind === 'פגישה') {
+  if (result.kind === 'פגישה') {
     if (!result.dateISO) missing.push('באיזה יום?');
     if (!result.time) missing.push('באיזו שעה?');
     if (!result.place) missing.push('איפה?');
-  } else if (kind === 'תזכורת') {
+  } else if (result.kind === 'תזכורת') {
     if (!result.dateISO) missing.push('באיזה יום להזכיר?');
     if (!result.time) missing.push('באיזו שעה להזכיר?');
   }
-
   result.question = missing.join(' ');
-  result.complete = missing.length === 0 && (kind === 'פגישה' || kind === 'תזכורת');
+  result.complete = missing.length === 0 && (result.kind === 'פגישה' || result.kind === 'תזכורת');
   result.summary = buildSummary_(result);
   return result;
 }
@@ -390,7 +393,7 @@ function buildSummary_(r) {
 
   if (r.dateHuman) parts.push(r.dateHuman);
   if (r.time) parts.push('בשעה ' + r.time);
-  if (r.place) parts.push('ב' + r.place);
+  if (r.place) parts.push(r.place.charAt(0) === 'ב' ? r.place : 'ב' + r.place);
   return parts.join(' · ');
 }
 
@@ -454,6 +457,15 @@ function inboxAnswer_(id, answer) {
   var original = found.values[INBOX_COL.original] || '';
   var newText = (original + ' ' + (answer || '')).trim();
   var parsed = parseHebrew_(newText);
+
+  // When the ONLY thing still missing is the place and the dictionary didn't
+  // recognize the answer, the answer IS the place — Ziv answered "איפה?",
+  // so any free text is accepted verbatim (his rule: be flexible on places).
+  if (parsed.kind === 'פגישה' && !parsed.place && parsed.dateISO && parsed.time && answer) {
+    parsed.place = String(answer).trim();
+    parsed.title = buildTitle_(parsed.kind, newText, parsed.person, parsed.place);
+    finalizeParse_(parsed);
+  }
 
   sheet.getRange(found.row, INBOX_COL.kind + 1).setValue(parsed.kind);
   sheet.getRange(found.row, INBOX_COL.summary + 1).setValue(parsed.summary);
