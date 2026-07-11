@@ -1,4 +1,4 @@
-const CACHE_NAME = 'va-shell-v1';
+const CACHE_NAME = 'va-shell-v2';
 const SHELL_FILES = [
   './',
   './index.html',
@@ -37,14 +37,13 @@ self.addEventListener('fetch', (event) => {
 
   if (new URL(req.url).origin !== self.location.origin) return;
 
+  // Network-first: always try to fetch the latest version so app updates
+  // reach the phone immediately; fall back to the cached copy when offline.
   event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-        return res;
-      }).catch(() => cached);
-    })
+    fetch(req).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+      return res;
+    }).catch(() => caches.match(req))
   );
 });
