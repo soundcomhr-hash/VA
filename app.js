@@ -213,9 +213,11 @@ function setupRecording() {
     }
   });
 
-  // TEST BUILD (v5): audio recording temporarily disabled to confirm the
-  // Android mic contention between MediaRecorder and SpeechRecognition.
-  const RECORD_AUDIO = false;
+  // v7: recording re-enabled now that the failures are explained (Samsung
+  // Internet's fake speech API + continuous mode). Verify on Chrome that
+  // MediaRecorder and SpeechRecognition coexist; if transcription breaks
+  // again, this flag isolates the recorder.
+  const RECORD_AUDIO = true;
 
   async function startRecording() {
     if (RECORD_AUDIO) {
