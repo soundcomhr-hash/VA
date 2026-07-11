@@ -540,6 +540,33 @@ function setupTriggers() {
 
 var HEB_DAY_LETTERS = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש']; // Sunday..Saturday
 
+// Ziv's hours-filling Google Form: entry IDs extracted from the live form.
+// A prefilled link pre-answers date + guide + place, so the branching form
+// jumps straight to that place's patient list after two "הבא" taps.
+var HOURS_FORM = {
+  base: 'https://docs.google.com/forms/d/e/1FAIpQLSeMaQ35HjQWits59-hqgQZYhdXjzcTV80T-nrVpk2ozi4ZtOg/viewform',
+  dateEntry: 'entry.1556154575',
+  guideEntry: 'entry.2037107479',
+  guideValue: 'זיו ויסברג',
+  placeEntry: 'entry.974072686',
+  places: ['ארקדש', 'בית מיכל', 'מעון הוד', 'אקים-כלנית', 'תיכון חדש', 'רוחמה', 'נווה האירוס', 'נהריה'],
+};
+
+function hoursFormLink_(dateISO, place) {
+  var url = HOURS_FORM.base + '?usp=pp_url' +
+    '&' + HOURS_FORM.dateEntry + '=' + dateISO +
+    '&' + HOURS_FORM.guideEntry + '=' + encodeURIComponent(HOURS_FORM.guideValue);
+  if (place) url += '&' + HOURS_FORM.placeEntry + '=' + encodeURIComponent(place);
+  return url;
+}
+
+function matchFormPlace_(eventTitle) {
+  for (var i = 0; i < HOURS_FORM.places.length; i++) {
+    if (eventTitle.indexOf(HOURS_FORM.places[i]) !== -1) return HOURS_FORM.places[i];
+  }
+  return null;
+}
+
 function checkHours() {
   var days = String(getSetting_('ימי תזכורת שעות') || 'א,ב,ג,ד,ה')
     .split(',').map(function (s) { return s.trim(); });
@@ -551,12 +578,15 @@ function checkHours() {
     .filter(function (ev) { return ev.getTitle().indexOf('🎵') === 0; });
   if (!sessions.length) return;
 
+  var dateISO = Utilities.formatDate(start, TZ, 'yyyy-MM-dd');
   var lines = sessions.map(function (ev) {
-    return '• ' + Utilities.formatDate(ev.getStartTime(), TZ, 'HH:mm') + ' — ' + ev.getTitle();
+    var line = '• ' + Utilities.formatDate(ev.getStartTime(), TZ, 'HH:mm') + ' — ' + ev.getTitle();
+    var place = matchFormPlace_(ev.getTitle());
+    line += '\n  📝 מילוי שעות (הכל כבר מסומן, רק ללחוץ הבא-הבא):\n  ' + hoursFormLink_(dateISO, place);
+    return line;
   });
-  var link = getSetting_('קישור מילוי שעות');
-  var body = 'היו לך היום ' + sessions.length + ' מפגשים:\n\n' + lines.join('\n') +
-    '\n\nאל תשכח למלא שעות!' + (link ? '\n' + link : '');
+  var body = 'היו לך היום ' + sessions.length + ' מפגשים:\n\n' + lines.join('\n\n') +
+    '\n\nאל תשכח למלא שעות!';
 
   MailApp.sendEmail(Session.getEffectiveUser().getEmail(),
     '🎵 תזכורת: מילוי שעות להיום', body);
