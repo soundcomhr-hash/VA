@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>העוזרת</title>
+<meta name="theme-color" content="#1b6b5a">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon.svg">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+
+  <header class="app-header">
+    <h1>העוזרת</h1>
+    <div class="header-right">
+      <span id="connStatus" class="conn-status">●</span>
+      <button id="settingsBtn" class="icon-btn" aria-label="הגדרות">⚙</button>
+    </div>
+  </header>
+
+  <main>
+
+    <section id="tab-record" class="tab-panel">
+      <div id="queueBadgeWrap" class="queue-badge-wrap" hidden>
+        <span id="queueBadge" class="queue-badge">0</span>
+        <span>ממתין לשליחה</span>
+      </div>
+
+      <div class="mic-area">
+        <button id="micBtn" class="mic-btn" aria-label="הקלטה">
+          <span id="micIcon">🎙️</span>
+        </button>
+        <p id="micStatus" class="mic-status">לחצו כדי לדבר</p>
+      </div>
+
+      <textarea id="transcript" class="transcript-box" placeholder="התמלול יופיע כאן... אפשר גם לערוך או להקליד ידנית"></textarea>
+
+      <div class="action-row">
+        <button id="sendBtn" class="btn btn-primary">שלח</button>
+        <button id="discardBtn" class="btn btn-secondary">מחק</button>
+      </div>
+
+      <p id="sendNote" class="send-note"></p>
+    </section>
+
+    <section id="tab-inbox" class="tab-panel" hidden>
+      <div class="placeholder-panel">
+        <p>מסך "ממתין" ייבנה בשלב הבא (חיבור לשרת).</p>
+      </div>
+    </section>
+
+    <section id="tab-today" class="tab-panel" hidden>
+      <div class="placeholder-panel">
+        <p>מסך "היום" ייבנה בשלב הבא (חיבור ליומן).</p>
+      </div>
+    </section>
+
+  </main>
+
+  <nav class="bottom-tabs">
+    <button data-tab="record" class="tab-btn active">🎙️<span>הקלטה</span></button>
+    <button data-tab="inbox" class="tab-btn">📥<span>ממתין</span></button>
+    <button data-tab="today" class="tab-btn">📅<span>היום</span></button>
+  </nav>
+
+</div>
+
+<button id="installBtn" class="install-btn" hidden>📲 התקן אפליקציה</button>
+
+<div id="settingsModal" class="modal" hidden>
+  <div class="modal-box">
+    <h2>הגדרות שרת</h2>
+    <p class="modal-hint">ריק כרגע — יתמלא בשלב הבא כשהשרת יהיה מוכן. עד אז ההקלטות נשמרות במכשיר וממתינות.</p>
+    <label>כתובת שרת (Endpoint URL)
+      <input id="endpointInput" type="url" placeholder="https://script.google.com/.../exec">
+    </label>
+    <label>קוד סודי (Token)
+      <input id="tokenInput" type="text" placeholder="">
+    </label>
+    <div class="modal-actions">
+      <button id="settingsSave" class="btn btn-primary">שמור</button>
+      <button id="settingsClose" class="btn btn-secondary">סגור</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

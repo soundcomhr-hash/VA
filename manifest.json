@@ -1,0 +1,17 @@
+{
+  "name": "העוזרת",
+  "short_name": "העוזרת",
+  "description": "עוזרת קולית לניהול פגישות וטיפולים",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1f1c",
+  "theme_color": "#1b6b5a",
+  "lang": "he",
+  "dir": "rtl",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
