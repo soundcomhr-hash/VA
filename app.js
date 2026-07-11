@@ -71,6 +71,19 @@ function blobToBase64(blob) {
   });
 }
 
+// ---------- Backend API ----------
+// Body goes as text/plain: Apps Script web apps can't answer the browser's
+// CORS "preflight" check that a JSON content-type would trigger.
+async function apiPost(action, payload) {
+  const res = await fetch(settings.endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(Object.assign({ action, token: settings.token }, payload || {})),
+  });
+  if (!res.ok) throw new Error('bad status ' + res.status);
+  return res.json();
+}
+
 // ---------- Sync queued items to the backend ----------
 let syncing = false;
 
@@ -87,21 +100,16 @@ async function attemptSync() {
     for (const item of items) {
       try {
         const audioBase64 = item.audioBlob ? await blobToBase64(item.audioBlob) : null;
-        const res = await fetch(settings.endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'capture',
-            token: settings.token,
-            text: item.text,
-            audioBase64,
-            audioMime: item.mime || null,
-            needsTranscription: !!item.needsTranscription,
-            createdAt: item.createdAt,
-          }),
+        const result = await apiPost('capture', {
+          text: item.text,
+          audioBase64,
+          audioMime: item.mime || null,
+          needsTranscription: !!item.needsTranscription,
+          createdAt: item.createdAt,
         });
-        if (!res.ok) throw new Error('bad status ' + res.status);
+        if (!result.ok) throw new Error(result.error || 'server-error');
         await queueDelete(item.id);
+        setSendNote(result.summary ? 'נקלט: ' + result.summary : 'נשלח לשרת בהצלחה');
       } catch (err) {
         // Network/server not ready yet - leave item queued and stop this pass.
         break;
@@ -122,7 +130,147 @@ function setupTabs() {
       btn.classList.add('active');
       document.querySelectorAll('.tab-panel').forEach((p) => (p.hidden = true));
       document.getElementById('tab-' + btn.dataset.tab).hidden = false;
+      if (btn.dataset.tab === 'inbox') loadInbox();
     });
+  });
+}
+
+// ---------- ממתין (inbox) screen ----------
+function setInboxStatus(msg) {
+  document.getElementById('inboxStatus').textContent = msg;
+}
+
+async function loadInbox() {
+  const list = document.getElementById('inboxList');
+  if (!settings.endpoint) {
+    list.innerHTML = '';
+    setInboxStatus('עדיין לא הוגדר שרת (⚙ למעלה). כשהשרת יחובר, הפריטים יופיעו כאן.');
+    return;
+  }
+  if (!navigator.onLine) {
+    setInboxStatus('אין חיבור לאינטרנט - נסו שוב כשיש קליטה.');
+    return;
+  }
+  setInboxStatus('טוען...');
+  try {
+    const result = await apiPost('inbox_list');
+    if (!result.ok) throw new Error(result.error);
+    renderInbox(result.items);
+  } catch (err) {
+    setInboxStatus('שגיאה בטעינה מהשרת. נסו לרענן.');
+  }
+}
+
+function renderInbox(items) {
+  const list = document.getElementById('inboxList');
+  list.innerHTML = '';
+  if (!items.length) {
+    setInboxStatus('אין פריטים ממתינים 🎉');
+    return;
+  }
+  setInboxStatus('');
+  items.forEach((item) => {
+    const card = document.createElement('div');
+    card.className = 'inbox-card';
+
+    const kind = document.createElement('div');
+    kind.className = 'card-kind';
+    kind.textContent = item.kind + ' · ' + item.created;
+    card.appendChild(kind);
+
+    const summary = document.createElement('div');
+    summary.className = 'card-summary';
+    summary.textContent = item.summary;
+    card.appendChild(summary);
+
+    if (item.audioUrl) {
+      const audio = document.createElement('div');
+      audio.className = 'card-audio';
+      const link = document.createElement('a');
+      link.href = item.audioUrl;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = '🎧 האזנה להקלטה';
+      audio.appendChild(link);
+      card.appendChild(audio);
+    }
+
+    if (item.question) {
+      const q = document.createElement('div');
+      q.className = 'card-question';
+      q.textContent = '❓ ' + item.question;
+      card.appendChild(q);
+
+      const row = document.createElement('div');
+      row.className = 'answer-row';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = 'תשובה...';
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-primary';
+      btn.textContent = 'ענה';
+      btn.addEventListener('click', async () => {
+        if (!input.value.trim()) return;
+        btn.disabled = true;
+        try {
+          const r = await apiPost('inbox_answer', { id: item.id, answer: input.value.trim() });
+          if (!r.ok) throw new Error(r.error);
+          await loadInbox();
+        } catch (e) {
+          setInboxStatus('שגיאה בשליחת התשובה. נסו שוב.');
+          btn.disabled = false;
+        }
+      });
+      row.appendChild(input);
+      row.appendChild(btn);
+      card.appendChild(row);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'card-actions';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'btn btn-confirm';
+    confirmBtn.textContent = 'אשר ✓';
+    confirmBtn.addEventListener('click', async () => {
+      confirmBtn.disabled = true;
+      try {
+        const r = await apiPost('inbox_confirm', { id: item.id });
+        if (!r.ok) {
+          setInboxStatus(r.error === 'incomplete'
+            ? 'אי אפשר לאשר - חסר מידע: ' + (r.question || '')
+            : 'שגיאה באישור.');
+          confirmBtn.disabled = false;
+          return;
+        }
+        setInboxStatus(r.message || 'אושר ✓');
+        await loadInbox();
+      } catch (e) {
+        setInboxStatus('שגיאה באישור. נסו שוב.');
+        confirmBtn.disabled = false;
+      }
+    });
+    actions.appendChild(confirmBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn btn-danger';
+    deleteBtn.textContent = 'מחק';
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm('למחוק את הפריט? (הטקסט המקורי יישאר רשום בגיליון "קלט")')) return;
+      deleteBtn.disabled = true;
+      try {
+        const r = await apiPost('inbox_delete', { id: item.id });
+        if (!r.ok) throw new Error(r.error);
+        await loadInbox();
+      } catch (e) {
+        setInboxStatus('שגיאה במחיקה. נסו שוב.');
+        deleteBtn.disabled = false;
+      }
+    });
+    actions.appendChild(deleteBtn);
+
+    card.appendChild(actions);
+    list.appendChild(card);
   });
 }
 
@@ -370,6 +518,8 @@ function registerServiceWorker() {
 }
 
 // ---------- Init ----------
+document.getElementById('inboxRefresh').addEventListener('click', loadInbox);
+
 setupTabs();
 setupSettings();
 setupConnStatus();

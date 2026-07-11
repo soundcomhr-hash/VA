@@ -14,7 +14,7 @@
 <div id="app">
 
   <header class="app-header">
-    <h1>העוזרת <span class="app-version">ג8</span></h1>
+    <h1>העוזרת <span class="app-version">ג9</span></h1>
     <div class="header-right">
       <span id="connStatus" class="conn-status">●</span>
       <button id="settingsBtn" class="icon-btn" aria-label="הגדרות">⚙</button>
@@ -48,9 +48,11 @@
     </section>
 
     <section id="tab-inbox" class="tab-panel" hidden>
-      <div class="placeholder-panel">
-        <p>מסך "ממתין" ייבנה בשלב הבא (חיבור לשרת).</p>
+      <div class="inbox-toolbar">
+        <button id="inboxRefresh" class="btn btn-secondary">🔄 רענן</button>
       </div>
+      <div id="inboxStatus" class="inbox-status"></div>
+      <div id="inboxList" class="inbox-list"></div>
     </section>
 
     <section id="tab-today" class="tab-panel" hidden>
