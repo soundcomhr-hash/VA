@@ -161,6 +161,14 @@ main {
   min-height: 20px;
 }
 
+.debug-line {
+  margin-top: 4px;
+  color: var(--warn);
+  font-size: 12px;
+  min-height: 16px;
+  direction: ltr;
+}
+
 .transcript-box {
   width: 100%;
   min-height: 140px;

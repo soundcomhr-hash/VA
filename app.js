@@ -180,6 +180,15 @@ let isRecording = false;
 let finalTranscript = '';
 let recognitionFatal = false;
 
+// Temporary diagnostic trail shown on screen (remove once speech works on device)
+const debugEvents = [];
+function debugLog(evt) {
+  debugEvents.push(evt);
+  if (debugEvents.length > 6) debugEvents.shift();
+  const el = document.getElementById('debugLine');
+  if (el) el.textContent = debugEvents.join(' | ');
+}
+
 function setupRecording() {
   const micBtn = document.getElementById('micBtn');
   const micStatus = document.getElementById('micStatus');
@@ -223,12 +232,17 @@ function setupRecording() {
     }
 
     finalTranscript = transcriptBox.value ? transcriptBox.value + ' ' : '';
+    if (!SpeechRecognitionImpl) debugLog('no-speech-api');
     if (SpeechRecognitionImpl) {
       recognition = new SpeechRecognitionImpl();
       recognition.lang = 'he-IL';
       recognition.continuous = true;
       recognition.interimResults = true;
+      recognition.onstart = () => debugLog('start');
+      recognition.onaudiostart = () => debugLog('audio');
+      recognition.onspeechstart = () => debugLog('speech');
       recognition.onresult = (event) => {
+        debugLog('result');
         let interim = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const chunk = event.results[i][0].transcript;
@@ -241,6 +255,7 @@ function setupRecording() {
         transcriptBox.value = (finalTranscript + interim).trim();
       };
       recognition.onerror = (event) => {
+        debugLog('err:' + event.error);
         const messages = {
           'not-allowed': 'אין הרשאה לזיהוי דיבור - אפשר לדבר, האודיו עדיין מוקלט',
           'service-not-allowed': 'זיהוי דיבור חסום בדפדפן - האודיו עדיין מוקלט',
@@ -256,6 +271,7 @@ function setupRecording() {
         }
       };
       recognition.onend = () => {
+        debugLog('end');
         if (isRecording && !recognitionFatal) {
           try { recognition.start(); } catch (e) {}
         }
