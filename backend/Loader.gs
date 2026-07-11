@@ -29,3 +29,14 @@ function fetchCode_() {
   cache.put('remote_code', code, 120);
   return code;
 }
+
+// Never called. Google grants permissions by statically scanning this file's
+// text, and it can't see through eval — these references force it to request
+// the scopes the remote code actually needs.
+function scopeHints_() {
+  SpreadsheetApp.create('scope-hint');
+  CalendarApp.getDefaultCalendar();
+  DriveApp.createFolder('scope-hint');
+  PropertiesService.getScriptProperties();
+  Session.getScriptTimeZone();
+}
