@@ -91,6 +91,8 @@ main {
   line-height: 1.6;
 }
 
+.queue-badge-wrap[hidden] { display: none; }
+
 .queue-badge-wrap {
   display: flex;
   align-items: center;
@@ -161,12 +163,21 @@ main {
   min-height: 20px;
 }
 
-.debug-line {
-  margin-top: 4px;
-  color: var(--warn);
-  font-size: 12px;
-  min-height: 16px;
-  direction: ltr;
+.audio-btn {
+  margin-top: 14px;
+  background: none;
+  border: 1px solid #3a4744;
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.audio-btn.recording {
+  border-color: var(--danger);
+  color: var(--danger);
+  animation: pulse 1.4s infinite;
 }
 
 .transcript-box {

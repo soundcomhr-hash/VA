@@ -96,6 +96,7 @@ async function attemptSync() {
             text: item.text,
             audioBase64,
             audioMime: item.mime || null,
+            needsTranscription: !!item.needsTranscription,
             createdAt: item.createdAt,
           }),
         });
@@ -168,7 +169,12 @@ function setSendNote(msg) {
   document.getElementById('sendNote').textContent = msg;
 }
 
-// ---------- Recording (speech recognition + audio capture) ----------
+// ---------- Recording ----------
+// Android cannot feed the microphone to SpeechRecognition and MediaRecorder
+// at the same time (recognition hears garbled audio and returns nomatch), so
+// capture is one of two exclusive modes per Ziv's decision:
+//   - big mic button  = live transcription only (no audio saved)
+//   - small audio button = audio recording only, queued as "לתמלול"
 const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 let recognition = null;
@@ -176,132 +182,123 @@ let mediaRecorder = null;
 let audioChunks = [];
 let currentAudioBlob = null;
 let currentAudioMime = null;
-let isRecording = false;
+let activeMode = null; // null | 'transcribe' | 'audio'
 let finalTranscript = '';
 let recognitionFatal = false;
 
-// Temporary diagnostic trail shown on screen (remove once speech works on device)
-const debugEvents = [];
-function debugLog(evt) {
-  debugEvents.push(evt);
-  if (debugEvents.length > 6) debugEvents.shift();
-  const el = document.getElementById('debugLine');
-  if (el) el.textContent = debugEvents.join(' | ');
-}
-
 function setupRecording() {
   const micBtn = document.getElementById('micBtn');
+  const audioBtn = document.getElementById('audioBtn');
   const micStatus = document.getElementById('micStatus');
   const transcriptBox = document.getElementById('transcript');
 
   if (!SpeechRecognitionImpl) {
-    micStatus.textContent = 'זיהוי דיבור לא זמין בדפדפן הזה - האודיו יוקלט, אפשר להקליד ידנית';
+    micBtn.classList.add('disabled');
+    micBtn.disabled = true;
+    micStatus.textContent = 'אין זיהוי דיבור בדפדפן הזה - השתמשו בהקלטת אודיו או הקלידו';
   }
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    micBtn.classList.add('disabled');
-    micBtn.disabled = true;
-    micStatus.textContent = 'הקלטת אודיו לא נתמכת בדפדפן הזה';
-    return;
+    audioBtn.disabled = true;
+    audioBtn.textContent = 'הקלטת אודיו לא נתמכת בדפדפן הזה';
   }
 
-  micBtn.addEventListener('click', async () => {
-    if (isRecording) {
-      stopRecording();
-    } else {
-      await startRecording();
+  micBtn.addEventListener('click', () => {
+    if (activeMode === 'transcribe') {
+      stopAll();
+    } else if (activeMode === null) {
+      startTranscription();
     }
   });
 
-  // v7: recording re-enabled now that the failures are explained (Samsung
-  // Internet's fake speech API + continuous mode). Verify on Chrome that
-  // MediaRecorder and SpeechRecognition coexist; if transcription breaks
-  // again, this flag isolates the recorder.
-  const RECORD_AUDIO = true;
-
-  async function startRecording() {
-    if (RECORD_AUDIO) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioChunks = [];
-        currentAudioBlob = null;
-        currentAudioMime = 'audio/webm';
-        mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
-        mediaRecorder.onstop = () => {
-          currentAudioBlob = new Blob(audioChunks, { type: currentAudioMime });
-          stream.getTracks().forEach((t) => t.stop());
-        };
-        mediaRecorder.start();
-      } catch (err) {
-        micStatus.textContent = 'לא ניתן לגשת למיקרופון - צריך לאשר הרשאה';
-        return;
-      }
+  audioBtn.addEventListener('click', async () => {
+    if (activeMode === 'audio') {
+      stopAll();
+    } else if (activeMode === null) {
+      await startAudioRecording();
     }
+  });
 
+  function startTranscription() {
     finalTranscript = transcriptBox.value ? transcriptBox.value + ' ' : '';
-    if (!SpeechRecognitionImpl) debugLog('no-speech-api');
-    if (SpeechRecognitionImpl) {
-      recognition = new SpeechRecognitionImpl();
-      recognition.lang = 'he-IL';
-      // Android Chrome is unreliable with continuous/interim mode: it can
-      // fire audio/speech events yet never deliver results. Single-utterance
-      // mode is the widely-supported path; onend auto-restarts to keep the
-      // session effectively continuous.
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.onnomatch = () => debugLog('nomatch');
-      recognition.onstart = () => debugLog('start');
-      recognition.onaudiostart = () => debugLog('audio');
-      recognition.onspeechstart = () => debugLog('speech');
-      recognition.onresult = (event) => {
-        debugLog('result');
-        let interim = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const chunk = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalTranscript += chunk + ' ';
-          } else {
-            interim += chunk;
-          }
+    recognition = new SpeechRecognitionImpl();
+    recognition.lang = 'he-IL';
+    // Single-utterance mode: continuous/interim is unreliable on Android
+    // (fires audio/speech events but never delivers results). onend
+    // auto-restarts so the session feels continuous anyway.
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.onresult = (event) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript + ' ';
         }
-        transcriptBox.value = (finalTranscript + interim).trim();
+      }
+      transcriptBox.value = finalTranscript.trim();
+    };
+    recognition.onerror = (event) => {
+      const messages = {
+        'not-allowed': 'אין הרשאה למיקרופון - צריך לאשר בדפדפן',
+        'service-not-allowed': 'זיהוי דיבור חסום בדפדפן הזה - השתמשו בהקלטת אודיו',
+        'network': 'אין אינטרנט לזיהוי דיבור - השתמשו בהקלטת אודיו בלבד',
+        'audio-capture': 'בעיה בגישה למיקרופון',
+        'no-speech': null,
+        'aborted': null,
       };
-      recognition.onerror = (event) => {
-        debugLog('err:' + event.error);
-        const messages = {
-          'not-allowed': 'אין הרשאה לזיהוי דיבור - אפשר לדבר, האודיו עדיין מוקלט',
-          'service-not-allowed': 'זיהוי דיבור חסום בדפדפן - האודיו עדיין מוקלט',
-          'network': 'אין אינטרנט לזיהוי דיבור - האודיו עדיין מוקלט, יתמלל אחר כך',
-          'audio-capture': 'בעיה בגישה למיקרופון עבור זיהוי דיבור',
-          'no-speech': null,
-          'aborted': null,
-        };
-        const msg = messages.hasOwnProperty(event.error) ? messages[event.error] : ('שגיאת זיהוי דיבור: ' + event.error);
-        if (msg) micStatus.textContent = msg;
-        if (event.error === 'not-allowed' || event.error === 'service-not-allowed' || event.error === 'audio-capture') {
-          recognitionFatal = true;
-        }
-      };
-      recognition.onend = () => {
-        debugLog('end');
-        if (isRecording && !recognitionFatal) {
-          try { recognition.start(); } catch (e) {}
-        }
-      };
-      recognitionFatal = false;
-      try { recognition.start(); } catch (e) {}
+      const msg = messages.hasOwnProperty(event.error) ? messages[event.error] : ('שגיאת זיהוי דיבור: ' + event.error);
+      if (msg) micStatus.textContent = msg;
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed' ||
+          event.error === 'audio-capture' || event.error === 'network') {
+        recognitionFatal = true;
+      }
+    };
+    recognition.onend = () => {
+      if (activeMode === 'transcribe' && !recognitionFatal) {
+        try { recognition.start(); } catch (e) {}
+      } else if (recognitionFatal) {
+        stopAll(true);
+      }
+    };
+    recognitionFatal = false;
+    try { recognition.start(); } catch (e) {
+      micStatus.textContent = 'זיהוי הדיבור לא נדלק - נסו שוב';
+      return;
     }
-
-    isRecording = true;
+    activeMode = 'transcribe';
     micBtn.classList.add('recording');
-    micStatus.textContent = 'מקליט... לחצו כדי לעצור';
+    micStatus.textContent = 'מקשיב... דברו, ואחרי משפט עצרו שנייה. לחצו לסיום';
   }
 
-  function stopRecording() {
-    isRecording = false;
+  async function startAudioRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunks = [];
+      currentAudioBlob = null;
+      currentAudioMime = 'audio/webm';
+      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+      mediaRecorder.onstop = () => {
+        currentAudioBlob = new Blob(audioChunks, { type: currentAudioMime });
+        stream.getTracks().forEach((t) => t.stop());
+        setSendNote('האודיו מוכן - לחצו שלח והוא יסומן "לתמלול"');
+      };
+      mediaRecorder.start();
+    } catch (err) {
+      micStatus.textContent = 'לא ניתן לגשת למיקרופון - צריך לאשר הרשאה';
+      return;
+    }
+    activeMode = 'audio';
+    audioBtn.classList.add('recording');
+    audioBtn.textContent = '⏹ עצור הקלטת אודיו';
+    micStatus.textContent = 'מקליט אודיו (ללא תמלול חי)...';
+  }
+
+  function stopAll(keepStatus) {
+    activeMode = null;
     micBtn.classList.remove('recording');
-    micStatus.textContent = 'לחצו כדי לדבר';
+    audioBtn.classList.remove('recording');
+    audioBtn.textContent = '🔴 הקלטת אודיו בלבד (לתמלול מאוחר)';
+    if (!keepStatus) micStatus.textContent = 'לחצו כדי לדבר';
     if (recognition) {
       try { recognition.stop(); } catch (e) {}
       recognition = null;
@@ -330,6 +327,7 @@ function setupSendDiscard() {
       text,
       audioBlob: currentAudioBlob,
       mime: currentAudioMime,
+      needsTranscription: !!currentAudioBlob && !text,
       createdAt: new Date().toISOString(),
     });
     resetCapture();
