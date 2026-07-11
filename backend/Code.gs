@@ -518,6 +518,60 @@ function inboxDelete_(id) {
   return { ok: true };
 }
 
+// ------------------------------------------------- hours-filling nudge ----
+// Runs every evening via a time trigger (see setupTriggers). If today's
+// calendar had 🎵 session events, emails Ziv a reminder to fill his hours.
+// Days are configurable in the הגדרות sheet (Hebrew day letters, e.g. א,ב,ג,ד,ה).
+
+function setupTriggers() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'checkHours') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('checkHours')
+    .timeBased().everyDays(1).atHour(19).nearMinute(30).inTimezone(TZ)
+    .create();
+
+  var settings = getOrCreateSheet_(getSpreadsheet_(), 'הגדרות', ['מפתח', 'ערך']);
+  if (!getSetting_('ימי תזכורת שעות')) upsertSetting_(settings, 'ימי תזכורת שעות', 'א,ב,ג,ד,ה');
+  upsertSetting_(settings, 'קישור מילוי שעות', getSetting_('קישור מילוי שעות') || '');
+
+  Logger.log('התזכורת הופעלה: כל ערב בסביבות 19:30 (ימים לפי לשונית הגדרות).');
+}
+
+var HEB_DAY_LETTERS = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש']; // Sunday..Saturday
+
+function checkHours() {
+  var days = String(getSetting_('ימי תזכורת שעות') || 'א,ב,ג,ד,ה')
+    .split(',').map(function (s) { return s.trim(); });
+  var todayLetter = HEB_DAY_LETTERS[startOfToday_().getDay()];
+  if (days.indexOf(todayLetter) === -1) return;
+
+  var start = startOfToday_();
+  var sessions = CalendarApp.getDefaultCalendar().getEvents(start, addDays_(start, 1))
+    .filter(function (ev) { return ev.getTitle().indexOf('🎵') === 0; });
+  if (!sessions.length) return;
+
+  var lines = sessions.map(function (ev) {
+    return '• ' + Utilities.formatDate(ev.getStartTime(), TZ, 'HH:mm') + ' — ' + ev.getTitle();
+  });
+  var link = getSetting_('קישור מילוי שעות');
+  var body = 'היו לך היום ' + sessions.length + ' מפגשים:\n\n' + lines.join('\n') +
+    '\n\nאל תשכח למלא שעות!' + (link ? '\n' + link : '');
+
+  MailApp.sendEmail(Session.getEffectiveUser().getEmail(),
+    '🎵 תזכורת: מילוי שעות להיום', body);
+}
+
+function getSetting_(key) {
+  var sheet = getSpreadsheet_().getSheetByName('הגדרות');
+  if (!sheet) return null;
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === key) return data[i][1];
+  }
+  return null;
+}
+
 // --------------------------------------------------------------- today ----
 
 function today_() {

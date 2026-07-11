@@ -12,6 +12,8 @@ var CODE_URL = 'https://raw.githubusercontent.com/soundcomhr-hash/VA/main/backen
 function doGet(e) { return runRemote_('doGet', [e]); }
 function doPost(e) { return runRemote_('doPost', [e]); }
 function setup() { return runRemote_('setup', []); }
+function setupTriggers() { return runRemote_('setupTriggers', []); }
+function checkHours() { return runRemote_('checkHours', []); }
 
 function runRemote_(fnName, args) {
   var code = fetchCode_();
@@ -39,4 +41,6 @@ function scopeHints_() {
   DriveApp.createFolder('scope-hint');
   PropertiesService.getScriptProperties();
   Session.getScriptTimeZone();
+  ScriptApp.newTrigger('scope-hint');
+  MailApp.sendEmail('scope-hint', 'scope-hint', 'scope-hint');
 }
