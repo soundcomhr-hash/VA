@@ -178,6 +178,7 @@ let currentAudioBlob = null;
 let currentAudioMime = null;
 let isRecording = false;
 let finalTranscript = '';
+let recognitionFatal = false;
 
 function setupRecording() {
   const micBtn = document.getElementById('micBtn');
@@ -239,7 +240,27 @@ function setupRecording() {
         }
         transcriptBox.value = (finalTranscript + interim).trim();
       };
-      recognition.onerror = () => {};
+      recognition.onerror = (event) => {
+        const messages = {
+          'not-allowed': 'אין הרשאה לזיהוי דיבור - אפשר לדבר, האודיו עדיין מוקלט',
+          'service-not-allowed': 'זיהוי דיבור חסום בדפדפן - האודיו עדיין מוקלט',
+          'network': 'אין אינטרנט לזיהוי דיבור - האודיו עדיין מוקלט, יתמלל אחר כך',
+          'audio-capture': 'בעיה בגישה למיקרופון עבור זיהוי דיבור',
+          'no-speech': null,
+          'aborted': null,
+        };
+        const msg = messages.hasOwnProperty(event.error) ? messages[event.error] : ('שגיאת זיהוי דיבור: ' + event.error);
+        if (msg) micStatus.textContent = msg;
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed' || event.error === 'audio-capture') {
+          recognitionFatal = true;
+        }
+      };
+      recognition.onend = () => {
+        if (isRecording && !recognitionFatal) {
+          try { recognition.start(); } catch (e) {}
+        }
+      };
+      recognitionFatal = false;
       try { recognition.start(); } catch (e) {}
     }
 
