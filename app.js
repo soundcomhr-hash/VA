@@ -242,8 +242,13 @@ function setupRecording() {
     if (SpeechRecognitionImpl) {
       recognition = new SpeechRecognitionImpl();
       recognition.lang = 'he-IL';
-      recognition.continuous = true;
-      recognition.interimResults = true;
+      // Android Chrome is unreliable with continuous/interim mode: it can
+      // fire audio/speech events yet never deliver results. Single-utterance
+      // mode is the widely-supported path; onend auto-restarts to keep the
+      // session effectively continuous.
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.onnomatch = () => debugLog('nomatch');
       recognition.onstart = () => debugLog('start');
       recognition.onaudiostart = () => debugLog('audio');
       recognition.onspeechstart = () => debugLog('speech');
