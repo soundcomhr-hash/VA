@@ -71,6 +71,17 @@ function blobToBase64(blob) {
   });
 }
 
+// One-tap setup: opening the app with ?endpoint=...&token=... saves the
+// server settings automatically (so Ziv never types them on the phone).
+(function applySetupLink() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('endpoint')) {
+    settings.endpoint = params.get('endpoint');
+    if (params.get('token')) settings.token = params.get('token');
+    history.replaceState(null, '', location.pathname);
+  }
+})();
+
 // ---------- Backend API ----------
 // Body goes as text/plain: Apps Script web apps can't answer the browser's
 // CORS "preflight" check that a JSON content-type would trigger.
