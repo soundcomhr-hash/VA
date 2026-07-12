@@ -273,6 +273,43 @@ main {
   font-weight: normal;
 }
 
+.today-subheading {
+  font-size: 14px;
+  color: var(--warn);
+  margin: 20px 0 10px;
+  font-weight: 600;
+}
+
+.today-pending-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--warn);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.today-pending-card .pending-body {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.today-pending-card .pending-question {
+  color: var(--warn);
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.today-pending-card .btn {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
 .today-list {
   display: flex;
   flex-direction: column;

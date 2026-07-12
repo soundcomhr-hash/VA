@@ -491,8 +491,31 @@ function createTask_(text, parsed) {
   if (!dueDate && parsed.time) {
     dueDate = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
   }
-  sheet.appendRow([id, now_(), parsed.title || text, '', 'פתוח', dueDate || '', parsed.time || '']);
+  var title = parsed.title || text;
+
+  // Per Ziv (2026-07-13, explicit override of the "never write without אשר"
+  // rule, scoped to dated tasks only): a task with a date must land on the
+  // calendar the moment it's captured, or he forgets it entirely. Meetings
+  // are unaffected - they still gate on place/time via ממתין/אשר.
+  if (dueDate) createTaskCalendarEvent_(title, dueDate, parsed.time);
+
+  sheet.appendRow([id, now_(), title, '', 'פתוח', dueDate || '', parsed.time || '']);
   return { id: id, color: classifyTaskColor_(text, dueDate) };
+}
+
+function createTaskCalendarEvent_(title, dueDateISO, dueTime) {
+  var p = dueDateISO.split('-');
+  var y = parseInt(p[0], 10), m = parseInt(p[1], 10) - 1, d = parseInt(p[2], 10);
+  var cal = CalendarApp.getDefaultCalendar();
+  if (dueTime) {
+    var t = dueTime.split(':');
+    var start = new Date(y, m, d, parseInt(t[0], 10), parseInt(t[1], 10));
+    var end = new Date(start.getTime() + 30 * 60 * 1000);
+    var event = cal.createEvent('✅ ' + title, start, end);
+    event.addPopupReminder(0);
+  } else {
+    cal.createAllDayEvent('✅ ' + title, new Date(y, m, d));
+  }
 }
 
 function findTaskRow_(sheet, id) {
@@ -803,5 +826,9 @@ function today_() {
       location: ev.getLocation(),
     };
   });
-  return { ok: true, events: events };
+  // Per Ziv: open ממתין items are "mandatory things to resolve today" even
+  // before their own date is known - surface them here so they can't be
+  // quietly forgotten in a tab he doesn't open.
+  var pending = inboxList_().items;
+  return { ok: true, events: events, pending: pending };
 }

@@ -293,9 +293,42 @@ async function loadToday() {
     const result = await apiPost('today');
     if (!result.ok) throw new Error(result.error);
     renderToday(result.events);
+    renderTodayPending(result.pending || []);
   } catch (err) {
     setTodayStatus('שגיאה בטעינה מהיומן. נסו לרענן.');
   }
+}
+
+function renderTodayPending(items) {
+  const wrap = document.getElementById('todayPendingWrap');
+  const list = document.getElementById('todayPendingList');
+  list.innerHTML = '';
+  wrap.hidden = items.length === 0;
+  items.forEach((item) => {
+    const card = document.createElement('div');
+    card.className = 'today-pending-card';
+
+    const body = document.createElement('div');
+    body.className = 'pending-body';
+    body.textContent = item.summary;
+    if (item.question) {
+      const q = document.createElement('div');
+      q.className = 'pending-question';
+      q.textContent = '❓ ' + item.question;
+      body.appendChild(q);
+    }
+    card.appendChild(body);
+
+    const goBtn = document.createElement('button');
+    goBtn.className = 'btn btn-secondary';
+    goBtn.textContent = 'לענות';
+    goBtn.addEventListener('click', () => {
+      document.querySelector('.tab-btn[data-tab="inbox"]').click();
+    });
+    card.appendChild(goBtn);
+
+    list.appendChild(card);
+  });
 }
 
 function renderToday(events) {
