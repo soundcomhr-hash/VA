@@ -176,6 +176,17 @@ async function loadTasks() {
 
 const TASK_COLORS = ['אדום', 'כחול', 'ירוק', 'צהוב'];
 
+const CONGRATS_MESSAGES = [
+  'כל הכבוד! הכל בוצע 🎉',
+  'סיימת הכל, יפה מאוד 💪',
+  'רשימה נקייה - עבודה טובה 👏',
+  'הכל מסומן. תהנה מהיום 🌿',
+  'זהו זה, אין מה להוסיף 🙌',
+];
+function pickCongrats() {
+  return CONGRATS_MESSAGES[Math.floor(Math.random() * CONGRATS_MESSAGES.length)];
+}
+
 function renderTasks(items) {
   const list = document.getElementById('tasksList');
   list.innerHTML = '';
@@ -183,7 +194,7 @@ function renderTasks(items) {
     setTasksStatus('אין משימות פתוחות 🎉');
     return;
   }
-  setTasksStatus('');
+  setTasksStatus(items.every((i) => i.status === 'בוצע') ? pickCongrats() : '');
   items.forEach((item) => {
     const card = document.createElement('div');
     card.className = 'task-card color-' + item.color + (item.status === 'בוצע' ? ' done' : '');

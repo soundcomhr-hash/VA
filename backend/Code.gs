@@ -248,19 +248,33 @@ function parseHebrew_(text) {
 }
 
 function finalizeParse_(result) {
-  var missing = [];
+  var needDay = false, needTime = false, needPlace = false;
   if (result.kind === 'פגישה') {
-    if (!result.dateISO) missing.push('באיזה יום?');
-    if (!result.time) missing.push('באיזו שעה?');
-    if (!result.place && !result.noPlaceConfirmed) missing.push('איפה?');
+    needDay = !result.dateISO;
+    needTime = !result.time;
+    needPlace = !result.place && !result.noPlaceConfirmed;
   } else if (result.kind === 'תזכורת') {
-    if (!result.dateISO) missing.push('באיזה יום להזכיר?');
-    if (!result.time) missing.push('באיזו שעה להזכיר?');
+    needDay = !result.dateISO;
+    needTime = !result.time;
   }
-  result.question = missing.join(' ');
-  result.complete = missing.length === 0 && (result.kind === 'פגישה' || result.kind === 'תזכורת');
+  result.question = buildQuestion_(needDay, needTime, needPlace);
+  result.complete = !needDay && !needTime && !needPlace &&
+    (result.kind === 'פגישה' || result.kind === 'תזכורת');
   result.summary = buildSummary_(result);
   return result;
+}
+
+// One short, natural sentence instead of several concatenated questions -
+// per Ziv: don't pile up questions, ask the minimum in one line.
+function buildQuestion_(needDay, needTime, needPlace) {
+  if (!needDay && !needTime && !needPlace) return '';
+  if (needDay && needTime && needPlace) return 'מתי ואיפה?';
+  if (needDay && needTime) return 'מתי?';
+  if (needDay && needPlace) return 'באיזה יום ואיפה?';
+  if (needTime && needPlace) return 'באיזו שעה ואיפה?';
+  if (needDay) return 'באיזה יום?';
+  if (needTime) return 'באיזו שעה?';
+  return 'איפה?';
 }
 
 function detectIntent_(text) {
@@ -511,7 +525,11 @@ function morningStart_() {
   var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
   var settings = getOrCreateSheet_(getSpreadsheet_(), 'הגדרות', ['מפתח', 'ערך']);
   upsertSetting_(settings, 'בוקר_' + today, new Date().toISOString());
-  return tasksList_();
+  // בוקר טוב is the morning ritual for TODAY's tasks specifically - per Ziv,
+  // not the whole open backlog (that's what the משימות tab + רענן is for).
+  var all = tasksList_();
+  all.items = all.items.filter(function (t) { return t.color === 'אדום'; });
+  return all;
 }
 
 function morningSnooze_() {
@@ -530,7 +548,9 @@ function checkMorningEscalation() {
   var elapsedMs = new Date().getTime() - new Date(startedAt).getTime();
   if (elapsedMs < 2 * 60 * 60 * 1000) return;
 
-  var open = tasksList_().items.filter(function (t) { return t.status !== 'בוצע'; });
+  var open = tasksList_().items.filter(function (t) {
+    return t.status !== 'בוצע' && t.color === 'אדום';
+  });
   if (!open.length) return;
 
   var lines = open.map(function (t) { return '• [' + t.color + '] ' + t.text; });
