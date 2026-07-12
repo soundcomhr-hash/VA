@@ -32,6 +32,7 @@ function setup() {
 
   getOrCreateSheet_(ss, 'קלט', ['תאריך', 'טקסט', 'קישור אודיו', 'לתמלול', 'מזהה']);
   getOrCreateSheet_(ss, 'ממתין', ['מזהה', 'נוצר', 'סטטוס', 'סוג', 'תיאור', 'שאלה', 'תשובה', 'נתונים', 'טקסט מקורי']);
+  getOrCreateSheet_(ss, 'משימות', TASKS_HEADERS);
   seedDictionary_(ss);
 
   var settings = getOrCreateSheet_(ss, 'הגדרות', ['מפתח', 'ערך']);
@@ -127,7 +128,12 @@ function doPost(e) {
     switch (body.action) {
       case 'capture': return jsonOut_(capture_(body));
       case 'inbox_list': return jsonOut_(inboxList_());
-      case 'inbox_answer': return jsonOut_(inboxAnswer_(body.id, body.answer));
+      case 'inbox_answer': return jsonOut_(inboxAnswer_(body.id, body.answer, !!body.noPlace));
+      case 'tasks_list': return jsonOut_(tasksList_());
+      case 'tasks_toggle': return jsonOut_(tasksToggle_(body.id));
+      case 'tasks_set_color': return jsonOut_(tasksSetColor_(body.id, body.color));
+      case 'morning_start': return jsonOut_(morningStart_());
+      case 'morning_snooze': return jsonOut_(morningSnooze_());
       case 'inbox_confirm': return jsonOut_(inboxConfirm_(body.id));
       case 'inbox_delete': return jsonOut_(inboxDelete_(body.id));
       case 'today': return jsonOut_(today_());
@@ -183,6 +189,14 @@ function capture_(body) {
   }
 
   var parsed = parseHebrew_(text);
+
+  // Tasks don't need Ziv's אשר - per his rule, only meetings truly need a
+  // place/time slot filled. A task goes straight to the משימות list.
+  if (parsed.kind === 'משימה') {
+    var task = createTask_(text, parsed);
+    return { ok: true, kind: 'משימה', summary: 'נוסף למשימות (' + task.color + ')' };
+  }
+
   inbox.appendRow([
     id, now_(), 'פתוח', parsed.kind,
     parsed.summary, parsed.question, '',
@@ -229,6 +243,7 @@ function parseHebrew_(text) {
     title: buildTitle_(kind, clean, person, place),
   };
 
+  result.noPlaceConfirmed = false;
   return finalizeParse_(result);
 }
 
@@ -237,7 +252,7 @@ function finalizeParse_(result) {
   if (result.kind === 'פגישה') {
     if (!result.dateISO) missing.push('באיזה יום?');
     if (!result.time) missing.push('באיזו שעה?');
-    if (!result.place) missing.push('איפה?');
+    if (!result.place && !result.noPlaceConfirmed) missing.push('איפה?');
   } else if (result.kind === 'תזכורת') {
     if (!result.dateISO) missing.push('באיזה יום להזכיר?');
     if (!result.time) missing.push('באיזו שעה להזכיר?');
@@ -415,6 +430,116 @@ function addDays_(d, n) {
 
 function pad_(n) { return (n < 10 ? '0' : '') + n; }
 
+// -------------------------------------------------------------- tasks -----
+// Per Ziv: a task never blocks on אשר. It gets a color automatically
+// (combination approach - auto rule first, he can override by hand):
+//   אדום = due today, ירוק = sport/fun, כחול = routine, צהוב = default
+// (open, unplanned - "anything written as a task that needs doing").
+
+var TASKS_HEADERS = ['מזהה', 'נוצר', 'טקסט', 'צבע', 'סטטוס', 'תאריך יעד'];
+var SPORT_WORDS_ = /ספורט|כושר|חדר כושר|ריצה|לרוץ|שחייה|לשחות|יוגה|פילאטיס|אימון|לשחק|כיף|בילוי|טיול|לטייל/;
+var ROUTINE_WORDS_ = /קבוע|שגרה|כל שבוע|כל יום|כל חודש|תמיד/;
+
+function getTasksSheet_() {
+  return getOrCreateSheet_(getSpreadsheet_(), 'משימות', TASKS_HEADERS);
+}
+
+function classifyTaskColor_(text, dateISO) {
+  var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  if (dateISO === today) return 'אדום';
+  if (SPORT_WORDS_.test(text)) return 'ירוק';
+  if (ROUTINE_WORDS_.test(text)) return 'כחול';
+  return 'צהוב';
+}
+
+function createTask_(text, parsed) {
+  var sheet = getTasksSheet_();
+  var id = Utilities.getUuid();
+  var color = classifyTaskColor_(text, parsed.dateISO);
+  sheet.appendRow([id, now_(), parsed.title || text, color, 'פתוח', parsed.dateISO || '']);
+  return { id: id, color: color };
+}
+
+function findTaskRow_(sheet, id) {
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === id) return i + 1;
+  }
+  return null;
+}
+
+function tasksList_() {
+  var sheet = getTasksSheet_();
+  var data = sheet.getDataRange().getValues();
+  var items = [];
+  for (var i = 1; i < data.length; i++) {
+    items.push({
+      id: data[i][0], created: String(data[i][1]), text: data[i][2],
+      color: data[i][3], status: data[i][4], dueDate: data[i][5],
+    });
+  }
+  items.reverse();
+  return { ok: true, items: items };
+}
+
+function tasksToggle_(id) {
+  var sheet = getTasksSheet_();
+  var row = findTaskRow_(sheet, id);
+  if (!row) return { ok: false, error: 'not-found' };
+  var next = sheet.getRange(row, 5).getValue() === 'בוצע' ? 'פתוח' : 'בוצע';
+  sheet.getRange(row, 5).setValue(next);
+  return { ok: true, status: next };
+}
+
+function tasksSetColor_(id, color) {
+  var valid = ['אדום', 'כחול', 'ירוק', 'צהוב'];
+  if (valid.indexOf(color) === -1) return { ok: false, error: 'bad-color' };
+  var sheet = getTasksSheet_();
+  var row = findTaskRow_(sheet, id);
+  if (!row) return { ok: false, error: 'not-found' };
+  sheet.getRange(row, 4).setValue(color);
+  return { ok: true };
+}
+
+// -------------------------------------------------- morning checklist -----
+// "בוקר טוב" is a button Ziv presses (not automatic). Pressing it starts a
+// 2-hour clock; an hourly trigger (checkMorningEscalation) nags by email
+// every hour after that while tasks remain open, until he marks them done
+// or taps "השתק להיום" - stored per-calendar-day so it resets on its own.
+
+function morningStart_() {
+  var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  var settings = getOrCreateSheet_(getSpreadsheet_(), 'הגדרות', ['מפתח', 'ערך']);
+  upsertSetting_(settings, 'בוקר_' + today, new Date().toISOString());
+  return tasksList_();
+}
+
+function morningSnooze_() {
+  var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  var settings = getOrCreateSheet_(getSpreadsheet_(), 'הגדרות', ['מפתח', 'ערך']);
+  upsertSetting_(settings, 'השתקה_' + today, 'כן');
+  return { ok: true };
+}
+
+function checkMorningEscalation() {
+  var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  var startedAt = getSetting_('בוקר_' + today);
+  if (!startedAt) return; // בוקר טוב not pressed yet today
+  if (getSetting_('השתקה_' + today) === 'כן') return; // silenced for today
+
+  var elapsedMs = new Date().getTime() - new Date(startedAt).getTime();
+  if (elapsedMs < 2 * 60 * 60 * 1000) return;
+
+  var open = tasksList_().items.filter(function (t) { return t.status !== 'בוצע'; });
+  if (!open.length) return;
+
+  var lines = open.map(function (t) { return '• [' + t.color + '] ' + t.text; });
+  MailApp.sendEmail(Session.getEffectiveUser().getEmail(),
+    '⏰ עדיין יש משימות פתוחות',
+    'משימות שעדיין לא סומנו כבוצעו:\n\n' + lines.join('\n') +
+    '\n\nלהפסיק את התזכורות להיום: פתח את העוזרת, לשונית משימות, "השתק להיום".');
+}
+
 // --------------------------------------------------------------- inbox ----
 
 var INBOX_COL = { id: 0, created: 1, status: 2, kind: 3, summary: 4, question: 5, answer: 6, data: 7, original: 8 };
@@ -449,7 +574,7 @@ function findInboxRow_(sheet, id) {
   return null;
 }
 
-function inboxAnswer_(id, answer) {
+function inboxAnswer_(id, answer, noPlace) {
   var sheet = getSpreadsheet_().getSheetByName('ממתין');
   var found = findInboxRow_(sheet, id);
   if (!found) return { ok: false, error: 'not-found' };
@@ -464,8 +589,12 @@ function inboxAnswer_(id, answer) {
   if (parsed.kind === 'פגישה' && !parsed.place && parsed.dateISO && parsed.time && answer) {
     parsed.place = String(answer).trim();
     parsed.title = buildTitle_(parsed.kind, newText, parsed.person, parsed.place);
-    finalizeParse_(parsed);
   }
+
+  // "אין מקום" - Ziv explicitly confirmed there's no place for this one;
+  // stop asking and let it through without a place.
+  if (noPlace) parsed.noPlaceConfirmed = true;
+  finalizeParse_(parsed);
 
   sheet.getRange(found.row, INBOX_COL.kind + 1).setValue(parsed.kind);
   sheet.getRange(found.row, INBOX_COL.summary + 1).setValue(parsed.summary);
@@ -525,10 +654,14 @@ function inboxDelete_(id) {
 
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === 'checkHours') ScriptApp.deleteTrigger(t);
+    var fn = t.getHandlerFunction();
+    if (fn === 'checkHours' || fn === 'checkMorningEscalation') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('checkHours')
     .timeBased().everyDays(1).atHour(19).nearMinute(30).inTimezone(TZ)
+    .create();
+  ScriptApp.newTrigger('checkMorningEscalation')
+    .timeBased().everyHours(1).inTimezone(TZ)
     .create();
 
   var settings = getOrCreateSheet_(getSpreadsheet_(), 'הגדרות', ['מפתח', 'ערך']);

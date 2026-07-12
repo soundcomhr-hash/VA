@@ -14,6 +14,7 @@ function doPost(e) { return runRemote_('doPost', [e]); }
 function setup() { return runRemote_('setup', []); }
 function setupTriggers() { return runRemote_('setupTriggers', []); }
 function checkHours() { return runRemote_('checkHours', []); }
+function checkMorningEscalation() { return runRemote_('checkMorningEscalation', []); }
 
 function runRemote_(fnName, args) {
   var code = fetchCode_();

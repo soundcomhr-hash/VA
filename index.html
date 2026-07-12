@@ -14,7 +14,7 @@
 <div id="app">
 
   <header class="app-header">
-    <h1>העוזרת <span class="app-version">ג10</span></h1>
+    <h1>העוזרת <span class="app-version">ג11</span></h1>
     <div class="header-right">
       <span id="connStatus" class="conn-status">●</span>
       <button id="settingsBtn" class="icon-btn" aria-label="הגדרות">⚙</button>
@@ -64,12 +64,25 @@
       <div id="todayList" class="today-list"></div>
     </section>
 
+    <section id="tab-tasks" class="tab-panel" hidden>
+      <div class="morning-row">
+        <button id="morningBtn" class="btn btn-primary">☀️ בוקר טוב</button>
+        <button id="snoozeBtn" class="btn btn-secondary">🔇 השתק להיום</button>
+      </div>
+      <div class="inbox-toolbar">
+        <button id="tasksRefresh" class="btn btn-secondary">🔄 רענן</button>
+      </div>
+      <div id="tasksStatus" class="inbox-status"></div>
+      <div id="tasksList" class="tasks-list"></div>
+    </section>
+
   </main>
 
   <nav class="bottom-tabs">
     <button data-tab="record" class="tab-btn active">🎙️<span>הקלטה</span></button>
     <button data-tab="inbox" class="tab-btn">📥<span>ממתין</span></button>
     <button data-tab="today" class="tab-btn">📅<span>היום</span></button>
+    <button data-tab="tasks" class="tab-btn">✅<span>משימות</span></button>
   </nav>
 
 </div>

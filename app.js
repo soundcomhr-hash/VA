@@ -143,7 +143,116 @@ function setupTabs() {
       document.getElementById('tab-' + btn.dataset.tab).hidden = false;
       if (btn.dataset.tab === 'inbox') loadInbox();
       if (btn.dataset.tab === 'today') loadToday();
+      if (btn.dataset.tab === 'tasks') loadTasks();
     });
+  });
+}
+
+// ---------- משימות (tasks) screen ----------
+function setTasksStatus(msg) {
+  document.getElementById('tasksStatus').textContent = msg;
+}
+
+async function loadTasks() {
+  const list = document.getElementById('tasksList');
+  if (!settings.endpoint) {
+    list.innerHTML = '';
+    setTasksStatus('עדיין לא הוגדר שרת (⚙ למעלה).');
+    return;
+  }
+  if (!navigator.onLine) {
+    setTasksStatus('אין חיבור לאינטרנט - נסו שוב כשיש קליטה.');
+    return;
+  }
+  setTasksStatus('טוען...');
+  try {
+    const result = await apiPost('tasks_list');
+    if (!result.ok) throw new Error(result.error);
+    renderTasks(result.items);
+  } catch (err) {
+    setTasksStatus('שגיאה בטעינה מהשרת. נסו לרענן.');
+  }
+}
+
+const TASK_COLORS = ['אדום', 'כחול', 'ירוק', 'צהוב'];
+
+function renderTasks(items) {
+  const list = document.getElementById('tasksList');
+  list.innerHTML = '';
+  if (!items.length) {
+    setTasksStatus('אין משימות פתוחות 🎉');
+    return;
+  }
+  setTasksStatus('');
+  items.forEach((item) => {
+    const card = document.createElement('div');
+    card.className = 'task-card color-' + item.color + (item.status === 'בוצע' ? ' done' : '');
+
+    const check = document.createElement('button');
+    check.className = 'task-check';
+    check.textContent = item.status === 'בוצע' ? '✓' : '';
+    check.addEventListener('click', async () => {
+      check.disabled = true;
+      try {
+        const r = await apiPost('tasks_toggle', { id: item.id });
+        if (!r.ok) throw new Error(r.error);
+        await loadTasks();
+      } catch (e) {
+        setTasksStatus('שגיאה בעדכון. נסו שוב.');
+        check.disabled = false;
+      }
+    });
+    card.appendChild(check);
+
+    const text = document.createElement('div');
+    text.className = 'task-text';
+    text.textContent = item.text;
+    card.appendChild(text);
+
+    const colors = document.createElement('div');
+    colors.className = 'task-colors';
+    TASK_COLORS.forEach((color) => {
+      const dot = document.createElement('button');
+      dot.className = 'color-' + color + (color === item.color ? ' selected' : '');
+      dot.title = color;
+      dot.addEventListener('click', async () => {
+        try {
+          const r = await apiPost('tasks_set_color', { id: item.id, color });
+          if (!r.ok) throw new Error(r.error);
+          await loadTasks();
+        } catch (e) {
+          setTasksStatus('שגיאה בשינוי הצבע. נסו שוב.');
+        }
+      });
+      colors.appendChild(dot);
+    });
+    card.appendChild(colors);
+
+    list.appendChild(card);
+  });
+}
+
+function setupMorningButtons() {
+  document.getElementById('morningBtn').addEventListener('click', async () => {
+    if (!settings.endpoint) { setTasksStatus('עדיין לא הוגדר שרת (⚙ למעלה).'); return; }
+    setTasksStatus('טוען...');
+    try {
+      const result = await apiPost('morning_start');
+      if (!result.ok) throw new Error(result.error);
+      renderTasks(result.items);
+    } catch (e) {
+      setTasksStatus('שגיאה. נסו שוב.');
+    }
+  });
+
+  document.getElementById('snoozeBtn').addEventListener('click', async () => {
+    try {
+      const r = await apiPost('morning_snooze');
+      if (!r.ok) throw new Error(r.error);
+      setTasksStatus('התזכורות הושתקו עד מחר.');
+    } catch (e) {
+      setTasksStatus('שגיאה. נסו שוב.');
+    }
   });
 }
 
@@ -305,6 +414,24 @@ function renderInbox(items) {
       row.appendChild(input);
       row.appendChild(btn);
       card.appendChild(row);
+
+      if (item.question.indexOf('איפה?') !== -1) {
+        const noPlaceBtn = document.createElement('button');
+        noPlaceBtn.className = 'btn btn-noplace';
+        noPlaceBtn.textContent = 'אין מקום';
+        noPlaceBtn.addEventListener('click', async () => {
+          noPlaceBtn.disabled = true;
+          try {
+            const r = await apiPost('inbox_answer', { id: item.id, answer: '', noPlace: true });
+            if (!r.ok) throw new Error(r.error);
+            await loadInbox();
+          } catch (e) {
+            setInboxStatus('שגיאה. נסו שוב.');
+            noPlaceBtn.disabled = false;
+          }
+        });
+        card.appendChild(noPlaceBtn);
+      }
     }
 
     const actions = document.createElement('div');
@@ -601,6 +728,8 @@ function registerServiceWorker() {
 // ---------- Init ----------
 document.getElementById('inboxRefresh').addEventListener('click', loadInbox);
 document.getElementById('todayRefresh').addEventListener('click', loadToday);
+document.getElementById('tasksRefresh').addEventListener('click', loadTasks);
+setupMorningButtons();
 
 setupTabs();
 setupSettings();
