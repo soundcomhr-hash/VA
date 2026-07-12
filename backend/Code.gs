@@ -33,6 +33,8 @@ function setup() {
   getOrCreateSheet_(ss, 'קלט', ['תאריך', 'טקסט', 'קישור אודיו', 'לתמלול', 'מזהה']);
   getOrCreateSheet_(ss, 'ממתין', ['מזהה', 'נוצר', 'סטטוס', 'סוג', 'תיאור', 'שאלה', 'תשובה', 'נתונים', 'טקסט מקורי']);
   getOrCreateSheet_(ss, 'משימות', TASKS_HEADERS);
+  getOrCreateSheet_(ss, 'מלאי', ['פריט', 'כמות', 'עודכן']);
+  getOrCreateSheet_(ss, 'ציוד בחוץ', ['פריט', 'כמות', 'אצל מי', 'תאריך', 'סטטוס']);
   seedDictionary_(ss);
 
   var settings = getOrCreateSheet_(ss, 'הגדרות', ['מפתח', 'ערך']);
@@ -276,12 +278,26 @@ function parseHebrew_(text) {
     kind = 'משימה';
   }
 
+  // Equipment: item + quantity (+ recipient for a give). The recipient may be
+  // outside the מילון, so fall back to a "ל<name>" pattern.
+  var item = null, qty = 1;
+  if (kind === 'ציוד' || kind === 'קניה') {
+    var qm = clean.match(/(\d+)/);
+    if (qm) qty = parseInt(qm[1], 10);
+    if (kind === 'ציוד' && !person) {
+      var pm = clean.match(/(?:^|\s)ל([א-ת]{2,})/);
+      if (pm) person = pm[1];
+    }
+    item = extractEquipmentItem_(clean, person);
+  }
+
   var result = {
     kind: kind, text: text,
     dateISO: date ? Utilities.formatDate(date, TZ, 'yyyy-MM-dd') : null,
     dateHuman: date ? hebrewDate_(date) : null,
     time: time ? pad_(time.h) + ':' + pad_(time.m) : null,
     place: place, placeFreeText: placeFreeText, person: person,
+    item: item, qty: qty,
     title: buildTitle_(kind, clean, person, place),
   };
 
@@ -406,6 +422,17 @@ function confirmCalendarEdit_(data) {
 }
 
 function finalizeParse_(result) {
+  // Equipment (give / buy) has its own required slots.
+  if (result.kind === 'ציוד' || result.kind === 'קניה') {
+    var q = [];
+    if (!result.item) q.push('איזה ציוד?');
+    if (result.kind === 'ציוד' && !result.person) q.push('למי?');
+    result.question = q.join(' ');
+    result.complete = q.length === 0;
+    result.summary = buildSummary_(result);
+    return result;
+  }
+
   var needDay = false, needTime = false, needPlace = false;
   if (result.kind === 'פגישה') {
     needDay = !result.dateISO;
@@ -460,7 +487,22 @@ function detectIntent_(text) {
   if (/^(פגישה|מפגש)/.test(text)) return 'פגישה';
   if (/(פגישה|מפגש)\s+עם/.test(text)) return 'פגישה';
   if (/(^|\s)(פגוש|לפגוש|נפגש|להיפגש)/.test(text)) return 'פגישה';
+  // Inventory: buying adds to מלאי, giving deducts + sets a return reminder.
+  if (/(^|\s)(קניתי|רכשתי|קנינו|קנית)/.test(text)) return 'קניה';
+  if (/(^|\s)(נתתי|מסרתי|נתן|נתנו|נתת)/.test(text)) return 'ציוד';
   return 'משימה';
+}
+
+// The equipment item = the text with the verb, the person (and "ל"+person),
+// quantities and connecting words stripped out - whatever's left is the item.
+function extractEquipmentItem_(text, person) {
+  var s = ' ' + text + ' ';
+  s = s.replace(/(קניתי|רכשתי|קנינו|קנית|נתתי|מסרתי|נתנו|נתן|נתת)/g, ' ');
+  if (person) s = s.replace(new RegExp('ל?' + person, 'g'), ' ');
+  s = s.replace(/\d+/g, ' ');
+  s = s.replace(/(^|\s)(את|ל|של|אצל|לי|לו|לה)(\s|$)/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s || null;
 }
 
 var DAY_NAMES = { 'ראשון': 0, 'שני': 1, 'שלישי': 2, 'רביעי': 3, 'חמישי': 4, 'שישי': 5, 'שבת': 6 };
@@ -592,6 +634,15 @@ function buildTitle_(kind, clean, person, place) {
 
 function buildSummary_(r) {
   var parts = [];
+  if (r.kind === 'ציוד') {
+    var q = (r.qty && r.qty > 1) ? ' ×' + r.qty : '';
+    return 'ציוד: ' + (r.item || '?') + q + ' → ' + (r.person || '?') +
+      ' · ניכוי מהמלאי + תזכורת החזרה בעוד שבוע';
+  }
+  if (r.kind === 'קניה') {
+    var qb = (r.qty && r.qty > 1) ? ' ×' + r.qty : '';
+    return 'קניתי: ' + (r.item || '?') + qb + ' · הוספה למלאי';
+  }
   if (r.kind === 'פגישה') parts.push('לקבוע: ' + r.title);
   else if (r.kind === 'תזכורת') parts.push(r.title);
   else if (r.kind === 'ביטול') parts.push('לבטל: ' + r.text);
@@ -918,6 +969,17 @@ function inboxConfirm_(id) {
     return { ok: true, message: editResult.message };
   }
 
+  // Equipment: buy adds to מלאי; give deducts, logs who has it, and sets a
+  // return reminder. מלאי is a ledger, so this only happens on אשר.
+  if (parsed.kind === 'ציוד' || parsed.kind === 'קניה') {
+    if (!parsed.complete) {
+      return { ok: false, error: 'incomplete', question: found.values[INBOX_COL.question] };
+    }
+    var invResult = confirmInventory_(parsed);
+    sheet.getRange(found.row, INBOX_COL.status + 1).setValue('אושר');
+    return invResult;
+  }
+
   var eventLink = null;
   if (parsed.kind === 'פגישה' || parsed.kind === 'תזכורת') {
     if (!parsed.complete) {
@@ -948,6 +1010,49 @@ function inboxDelete_(id) {
   if (!found) return { ok: false, error: 'not-found' };
   sheet.getRange(found.row, INBOX_COL.status + 1).setValue('נמחק');
   return { ok: true };
+}
+
+// ----------------------------------------------------------- inventory ----
+
+function confirmInventory_(parsed) {
+  var qty = parsed.qty && parsed.qty > 0 ? parsed.qty : 1;
+  if (parsed.kind === 'קניה') {
+    var afterBuy = adjustInventory_(parsed.item, qty);
+    return { ok: true, message: 'נוסף למלאי: ' + parsed.item + ' ×' + qty + ' (סה"כ ' + afterBuy + ')' };
+  }
+  // give: deduct, log who has it, and set a return-check reminder in 7 days.
+  var afterGive = adjustInventory_(parsed.item, -qty);
+  logEquipmentOut_(parsed.item, qty, parsed.person);
+  var when = addDays_(startOfToday_(), 7);
+  var ev = CalendarApp.getDefaultCalendar().createAllDayEvent(
+    '🔧 לבדוק ציוד אצל ' + parsed.person + ' (' + parsed.item + ')', when);
+  ev.addPopupReminder(0);
+  return {
+    ok: true,
+    message: 'נמסר ל' + parsed.person + ': ' + parsed.item + ' ×' + qty +
+      ' · נותרו במלאי ' + afterGive + ' · תזכורת בדיקה בעוד שבוע',
+  };
+}
+
+// Adjust an item's quantity (create the row if it's new); returns the new total.
+function adjustInventory_(item, delta) {
+  var sheet = getOrCreateSheet_(getSpreadsheet_(), 'מלאי', ['פריט', 'כמות', 'עודכן']);
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === item) {
+      var next = (parseInt(data[i][1], 10) || 0) + delta;
+      sheet.getRange(i + 1, 2).setValue(next);
+      sheet.getRange(i + 1, 3).setValue(now_());
+      return next;
+    }
+  }
+  sheet.appendRow([item, delta, now_()]);
+  return delta;
+}
+
+function logEquipmentOut_(item, qty, person) {
+  var sheet = getOrCreateSheet_(getSpreadsheet_(), 'ציוד בחוץ', ['פריט', 'כמות', 'אצל מי', 'תאריך', 'סטטוס']);
+  sheet.appendRow([item, qty, person, now_(), 'בחוץ']);
 }
 
 // ------------------------------------------------- hours-filling nudge ----
