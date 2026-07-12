@@ -540,8 +540,8 @@ function renderInbox(items) {
       try {
         const r = await apiPost('inbox_confirm', { id: item.id });
         if (!r.ok) {
-          setInboxStatus(r.error === 'incomplete'
-            ? 'אי אפשר לאשר - חסר מידע: ' + (r.question || '')
+          setInboxStatus(r.question
+            ? (r.error === 'incomplete' ? 'אי אפשר לאשר - חסר מידע: ' : '') + r.question
             : 'שגיאה באישור.');
           confirmBtn.disabled = false;
           return;

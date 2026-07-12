@@ -197,6 +197,19 @@ function capture_(body) {
     return { ok: true, kind: 'משימה', summary: 'נוסף למשימות (' + task.color + ')' };
   }
 
+  // Cancel / move / update act on an EXISTING calendar event. Resolve the
+  // target now so the inbox card can show exactly which event will change,
+  // and store its id - nothing is touched until Ziv taps אשר.
+  if (parsed.kind === 'ביטול' || parsed.kind === 'העברה' || parsed.kind === 'עדכון') {
+    var edit = resolveAndBuildEdit_(parsed);
+    inbox.appendRow([
+      id, now_(), 'פתוח', parsed.kind,
+      edit.summary, edit.question, '',
+      JSON.stringify(edit.data), text,
+    ]);
+    return { ok: true, kind: parsed.kind, summary: edit.summary, question: edit.question };
+  }
+
   inbox.appendRow([
     id, now_(), 'פתוח', parsed.kind,
     parsed.summary, parsed.question, '',
@@ -231,13 +244,21 @@ function parseHebrew_(text) {
   var date = parseDate_(clean);
   var time = parseTime_(clean);
   var dict = loadDictionary_();
-  var place = matchEntry_(clean, dict.places);
+  var dictPlace = matchEntry_(clean, dict.places);
+  var place = dictPlace;
   var placeFreeText = false;
   if (!place) {
     place = extractInlinePlace_(clean);
     if (place) placeFreeText = true;
   }
   var person = matchEntry_(clean, dict.people);
+
+  // A cancel/move/update intent needs an identifiable existing event. If the
+  // text names no known person or dictionary place, it's almost certainly a
+  // normal task ("תוסיף חלב לרשימה"), not a calendar edit - treat it as one.
+  if ((kind === 'ביטול' || kind === 'העברה' || kind === 'עדכון') && !person && !dictPlace) {
+    kind = 'משימה';
+  }
 
   var result = {
     kind: kind, text: text,
@@ -250,6 +271,122 @@ function parseHebrew_(text) {
 
   result.noPlaceConfirmed = false;
   return finalizeParse_(result);
+}
+
+// ----------------------------------------------- calendar edits (v16) -----
+// Cancel / move / update an existing event. Target resolution and the actual
+// change both go through the inbox + אשר, and the card always names the exact
+// event (title + when) before Ziv confirms - modifying a calendar is less
+// reversible than creating, so he must see what will change.
+
+function resolveTargetEvents_(parsed) {
+  var terms = [];
+  if (parsed.person && parsed.person.length >= 2) terms.push(parsed.person);
+  // Only a KNOWN (dictionary) place identifies an existing event; a free-text
+  // place in an update command is the NEW value, not a search key.
+  if (parsed.place && !parsed.placeFreeText && parsed.place.length >= 2) terms.push(parsed.place);
+  if (!terms.length) return [];
+
+  var start = new Date();
+  var horizon = addDays_(startOfToday_(), 60);
+  var events = CalendarApp.getDefaultCalendar().getEvents(start, horizon);
+  var matches = events.filter(function (ev) {
+    var title = ev.getTitle();
+    for (var i = 0; i < terms.length; i++) {
+      if (title.indexOf(terms[i]) !== -1) return true;
+    }
+    return false;
+  });
+  // If the command named a specific day, prefer events on that day.
+  if (parsed.dateISO && parsed.kind !== 'העברה') {
+    var sameDay = matches.filter(function (ev) {
+      return Utilities.formatDate(ev.getStartTime(), TZ, 'yyyy-MM-dd') === parsed.dateISO;
+    });
+    if (sameDay.length) return sameDay;
+  }
+  return matches;
+}
+
+function resolveAndBuildEdit_(parsed) {
+  var candidates = resolveTargetEvents_(parsed);
+  if (!candidates.length) {
+    return {
+      data: { kind: parsed.kind, notFound: true, complete: false },
+      summary: editVerb_(parsed.kind) + ': לא נמצא אירוע תואם ביומן',
+      question: 'לא מצאתי אירוע כזה - נסו להוסיף יום, או מחקו.',
+    };
+  }
+  candidates.sort(function (a, b) { return a.getStartTime() - b.getStartTime(); });
+  var ev = candidates[0];
+  var data = { kind: parsed.kind, eventId: ev.getId(), complete: true };
+  var missing = '';
+
+  if (parsed.kind === 'עדכון') {
+    if (parsed.place) data.newPlace = parsed.place;
+    else { missing = 'איזה מקום להוסיף?'; data.complete = false; }
+  } else if (parsed.kind === 'העברה') {
+    if (parsed.dateISO) data.newDateISO = parsed.dateISO;
+    if (parsed.time) data.newTime = parsed.time;
+    if (!parsed.dateISO && !parsed.time) { missing = 'לאיזה יום או שעה להעביר?'; data.complete = false; }
+  }
+
+  var when = hebrewDate_(ev.getStartTime()) + ' ' + Utilities.formatDate(ev.getStartTime(), TZ, 'HH:mm');
+  var note = candidates.length > 1 ? ' (הקרוב ביותר)' : '';
+  var summary = buildEditSummary_(parsed.kind, ev.getTitle(), data) + ' · [' + when + note + ']';
+  return { data: data, summary: summary, question: missing };
+}
+
+function buildEditSummary_(kind, title, data) {
+  if (kind === 'ביטול') return 'לבטל: ' + title;
+  if (kind === 'עדכון') return 'לעדכן: ' + title + (data.newPlace ? ' → מקום: ' + data.newPlace : '');
+  if (kind === 'העברה') {
+    var to = [];
+    if (data.newDateISO) to.push(hebrewDateISO_(data.newDateISO));
+    if (data.newTime) to.push(data.newTime);
+    return 'להעביר: ' + title + (to.length ? ' → ' + to.join(' ') : '');
+  }
+  return title;
+}
+
+function editVerb_(kind) {
+  return kind === 'ביטול' ? 'לבטל' : kind === 'עדכון' ? 'לעדכן' : 'להעביר';
+}
+
+function hebrewDateISO_(iso) {
+  var p = iso.split('-');
+  return hebrewDate_(new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10)));
+}
+
+// Applies the edit on אשר. Re-fetches by id so a stale card can't act on the
+// wrong event; if the event is gone, it reports instead of guessing.
+function confirmCalendarEdit_(data) {
+  if (data.notFound || !data.eventId) {
+    return { ok: false, error: 'no-target', question: 'לא נמצא אירוע - מחקו ונסו שוב עם יום מדויק.' };
+  }
+  var ev = null;
+  try { ev = CalendarApp.getDefaultCalendar().getEventById(data.eventId); } catch (e) {}
+  if (!ev) return { ok: false, error: 'event-gone', question: 'האירוע כבר לא קיים ביומן.' };
+  var title = ev.getTitle();
+
+  if (data.kind === 'ביטול') {
+    ev.deleteEvent();
+    return { ok: true, message: 'בוטל: ' + title };
+  }
+  if (data.kind === 'עדכון') {
+    if (data.newPlace) ev.setLocation(data.newPlace);
+    return { ok: true, message: 'עודכן: ' + title + (data.newPlace ? ' · ' + data.newPlace : '') };
+  }
+  if (data.kind === 'העברה') {
+    var start = ev.getStartTime(), durMs = ev.getEndTime().getTime() - start.getTime();
+    var y = start.getFullYear(), mo = start.getMonth(), d = start.getDate();
+    var hh = start.getHours(), mm = start.getMinutes();
+    if (data.newDateISO) { var p = data.newDateISO.split('-'); y = parseInt(p[0], 10); mo = parseInt(p[1], 10) - 1; d = parseInt(p[2], 10); }
+    if (data.newTime) { var t = data.newTime.split(':'); hh = parseInt(t[0], 10); mm = parseInt(t[1], 10); }
+    var newStart = new Date(y, mo, d, hh, mm);
+    ev.setTime(newStart, new Date(newStart.getTime() + durMs));
+    return { ok: true, message: 'הוזז: ' + title + ' → ' + Utilities.formatDate(newStart, TZ, 'dd/MM HH:mm') };
+  }
+  return { ok: false, error: 'unknown-edit' };
 }
 
 function finalizeParse_(result) {
@@ -299,6 +436,7 @@ function detectIntent_(text) {
   if (/(^|\s)(תזכיר|תזכורת|להזכיר|תזכירי)/.test(text)) return 'תזכורת';
   if (/(^|\s)(בטל|לבטל|תבטל|מבוטל)/.test(text)) return 'ביטול';
   if (/(^|\s)(העבר|הזז|תעביר|תזיז|לדחות|דחה)/.test(text)) return 'העברה';
+  if (/(^|\s)(עדכן|תעדכן|עדכון|הוסף|תוסיף)/.test(text)) return 'עדכון';
   // A meeting is the verb (קבע) OR the noun said naturally: people write
   // "פגישה עם נווה" without "קבע". Kept narrow (start of text, or "פגישה עם",
   // or a meet-verb) so an incidental "להכין חומרים לפגישה" stays a task.
@@ -707,6 +845,19 @@ function inboxAnswer_(id, answer, noPlace) {
   var newText = (original + ' ' + (answer || '')).trim();
   var parsed = parseHebrew_(newText);
 
+  // A calendar-edit card (cancel/move/update) re-resolves the target + missing
+  // detail from the combined text, keeping the eventId/edit structure.
+  if (parsed.kind === 'ביטול' || parsed.kind === 'העברה' || parsed.kind === 'עדכון') {
+    var edit = resolveAndBuildEdit_(parsed);
+    sheet.getRange(found.row, INBOX_COL.kind + 1).setValue(parsed.kind);
+    sheet.getRange(found.row, INBOX_COL.summary + 1).setValue(edit.summary);
+    sheet.getRange(found.row, INBOX_COL.question + 1).setValue(edit.question);
+    sheet.getRange(found.row, INBOX_COL.answer + 1).setValue(answer);
+    sheet.getRange(found.row, INBOX_COL.data + 1).setValue(JSON.stringify(edit.data));
+    sheet.getRange(found.row, INBOX_COL.original + 1).setValue(newText);
+    return { ok: true, summary: edit.summary, question: edit.question, complete: !!edit.data.complete };
+  }
+
   // When the ONLY thing still missing is the place and the dictionary didn't
   // recognize the answer, the answer IS the place — Ziv answered "איפה?",
   // so any free text is accepted verbatim (his rule: be flexible on places).
@@ -739,6 +890,17 @@ function inboxConfirm_(id) {
 
   var parsed = {};
   try { parsed = JSON.parse(found.values[INBOX_COL.data] || '{}'); } catch (e) {}
+
+  // Cancel / move / update an existing event.
+  if (parsed.kind === 'ביטול' || parsed.kind === 'העברה' || parsed.kind === 'עדכון') {
+    if (!parsed.complete) {
+      return { ok: false, error: 'incomplete', question: found.values[INBOX_COL.question] };
+    }
+    var editResult = confirmCalendarEdit_(parsed);
+    if (!editResult.ok) return editResult;
+    sheet.getRange(found.row, INBOX_COL.status + 1).setValue('אושר');
+    return { ok: true, message: editResult.message };
+  }
 
   var eventLink = null;
   if (parsed.kind === 'פגישה' || parsed.kind === 'תזכורת') {
