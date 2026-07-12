@@ -134,7 +134,9 @@ async function attemptSync() {
         });
         if (!result.ok) throw new Error(result.error || 'server-error');
         await queueDelete(item.id);
-        setSendNote(result.summary ? 'נקלט: ' + result.summary : 'נשלח לשרת בהצלחה');
+        setSendNote(result.summary
+          ? 'נקלט: ' + result.summary + (result.question ? ' · ממתין לתשובה שלך 📥' : '')
+          : 'נשלח לשרת בהצלחה');
       } catch (err) {
         // Network/server not ready yet - leave item queued and stop this pass.
         break;
@@ -285,6 +287,9 @@ function setupMorningButtons() {
       const result = await apiPost('morning_start');
       if (!result.ok) throw new Error(result.error);
       renderTasks(result.items);
+      setTasksStatus(result.items.length
+        ? 'בוקר טוב! מציג רק את משימות היום - "רענן" מציג הכל'
+        : 'בוקר טוב! אין משימות להיום 🎉');
     } catch (e) {
       setTasksStatus('שגיאה. נסו שוב.');
     }
@@ -447,6 +452,9 @@ function removeInboxLocally(id) {
 }
 
 function renderInbox(items) {
+  const badge = document.getElementById('inboxTabBadge');
+  badge.textContent = String(items.length);
+  badge.hidden = items.length === 0;
   const list = document.getElementById('inboxList');
   list.innerHTML = '';
   if (!items.length) {
@@ -506,6 +514,7 @@ function renderInbox(items) {
           btn.disabled = false;
         }
       });
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
       row.appendChild(input);
       row.appendChild(btn);
       card.appendChild(row);
@@ -827,6 +836,7 @@ document.getElementById('tasksRefresh').addEventListener('click', loadTasks);
 setupMorningButtons();
 
 setupTabs();
+if (settings.endpoint && navigator.onLine) loadInbox();
 setupSettings();
 setupConnStatus();
 setupRecording();
