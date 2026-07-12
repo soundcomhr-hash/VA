@@ -232,6 +232,11 @@ function parseHebrew_(text) {
   var time = parseTime_(clean);
   var dict = loadDictionary_();
   var place = matchEntry_(clean, dict.places);
+  var placeFreeText = false;
+  if (!place) {
+    place = extractInlinePlace_(clean);
+    if (place) placeFreeText = true;
+  }
   var person = matchEntry_(clean, dict.people);
 
   var result = {
@@ -239,7 +244,7 @@ function parseHebrew_(text) {
     dateISO: date ? Utilities.formatDate(date, TZ, 'yyyy-MM-dd') : null,
     dateHuman: date ? hebrewDate_(date) : null,
     time: time ? pad_(time.h) + ':' + pad_(time.m) : null,
-    place: place, person: person,
+    place: place, placeFreeText: placeFreeText, person: person,
     title: buildTitle_(kind, clean, person, place),
   };
 
@@ -277,11 +282,30 @@ function buildQuestion_(needDay, needTime, needPlace) {
   return 'איפה?';
 }
 
+// A place stated inline that isn't in the מילון: "מקום אצלי בבית", "אצל דנה".
+// Per Ziv: when he explicitly names a place, take it verbatim - the dictionary
+// is for canonical names, not a gate that blocks ad-hoc locations.
+function extractInlinePlace_(text) {
+  var m = text.match(/מקום\s+(.+)$/);
+  if (m) return m[1].trim();
+  m = text.match(/(אצל\S*(?:\s+\S+)*)$/);
+  if (m) return m[1].trim();
+  return null;
+}
+
 function detectIntent_(text) {
-  if (/(^|\s)(קבע|תקבע|לקבוע|קבעי|נקבע)/.test(text)) return 'פגישה';
+  // Reminder/cancel/move verbs take priority: "תזכיר לי על הפגישה" is a
+  // reminder, not a new meeting, even though it contains the word פגישה.
   if (/(^|\s)(תזכיר|תזכורת|להזכיר|תזכירי)/.test(text)) return 'תזכורת';
   if (/(^|\s)(בטל|לבטל|תבטל|מבוטל)/.test(text)) return 'ביטול';
   if (/(^|\s)(העבר|הזז|תעביר|תזיז|לדחות|דחה)/.test(text)) return 'העברה';
+  // A meeting is the verb (קבע) OR the noun said naturally: people write
+  // "פגישה עם נווה" without "קבע". Kept narrow (start of text, or "פגישה עם",
+  // or a meet-verb) so an incidental "להכין חומרים לפגישה" stays a task.
+  if (/(^|\s)(קבע|תקבע|לקבוע|קבעי|נקבע)/.test(text)) return 'פגישה';
+  if (/^(פגישה|מפגש)/.test(text)) return 'פגישה';
+  if (/(פגישה|מפגש)\s+עם/.test(text)) return 'פגישה';
+  if (/(^|\s)(פגוש|לפגוש|נפגש|להיפגש)/.test(text)) return 'פגישה';
   return 'משימה';
 }
 
@@ -422,7 +446,12 @@ function buildSummary_(r) {
 
   if (r.dateHuman) parts.push(r.dateHuman);
   if (r.time) parts.push('בשעה ' + r.time);
-  if (r.place) parts.push(r.place.charAt(0) === 'ב' ? r.place : 'ב' + r.place);
+  if (r.place) {
+    // Dictionary names get a "ב" prefix ("בית מיכל" → "בבית מיכל"); free-text
+    // places the user phrased himself ("אצלי בבית") are shown as-is.
+    if (r.placeFreeText) parts.push(r.place);
+    else parts.push(r.place.charAt(0) === 'ב' ? r.place : 'ב' + r.place);
+  }
   return parts.join(' · ');
 }
 
@@ -683,6 +712,7 @@ function inboxAnswer_(id, answer, noPlace) {
   // so any free text is accepted verbatim (his rule: be flexible on places).
   if (parsed.kind === 'פגישה' && !parsed.place && parsed.dateISO && parsed.time && answer) {
     parsed.place = String(answer).trim();
+    parsed.placeFreeText = true;
     parsed.title = buildTitle_(parsed.kind, newText, parsed.person, parsed.place);
   }
 
