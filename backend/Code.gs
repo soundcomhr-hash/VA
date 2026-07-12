@@ -529,17 +529,24 @@ function findTaskRow_(sheet, id) {
 function tasksList_() {
   var sheet = getTasksSheet_();
   var data = sheet.getDataRange().getValues();
+  // Google Sheets silently converts an ISO string like "2026-07-13" written
+  // to a cell into a real Date value, so reading it back gives a Date object
+  // - NOT the "yyyy-MM-dd" string. That broke every dueDate === today check
+  // and left dated tasks yellow. Recover the original string by formatting
+  // the Date back in the spreadsheet's own timezone (a symmetric round-trip).
+  var ssTz = getSpreadsheet_().getSpreadsheetTimeZone();
   var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
-  var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  var nowMin = parseInt(Utilities.formatDate(new Date(), TZ, 'H'), 10) * 60 +
+               parseInt(Utilities.formatDate(new Date(), TZ, 'm'), 10);
   var items = [];
   for (var i = 1; i < data.length; i++) {
     var text = data[i][2];
     var manualColor = data[i][3];
-    var dueDate = data[i][5];
-    var dueTime = data[i][6];
+    var dueDate = cellToText_(data[i][5], ssTz, 'yyyy-MM-dd');
+    var dueTime = cellToText_(data[i][6], ssTz, 'HH:mm');
     var urgent = false;
     if (dueDate === today && dueTime) {
-      var t = String(dueTime).split(':');
+      var t = dueTime.split(':');
       var dueMin = parseInt(t[0], 10) * 60 + parseInt(t[1], 10);
       urgent = (dueMin - nowMin) <= URGENT_WINDOW_MIN;
     }
@@ -551,6 +558,17 @@ function tasksList_() {
   }
   items.reverse();
   return { ok: true, items: items };
+}
+
+// Undo Sheets' auto-conversion: a cell we wrote as an ISO string may read
+// back as a Date. Format it in the same timezone it was stored in to recover
+// the exact original string; pass plain strings straight through.
+function cellToText_(val, tz, fmt) {
+  if (val === '' || val === null || val === undefined) return '';
+  if (Object.prototype.toString.call(val) === '[object Date]') {
+    return Utilities.formatDate(val, tz, fmt);
+  }
+  return String(val).trim();
 }
 
 function tasksToggle_(id) {
