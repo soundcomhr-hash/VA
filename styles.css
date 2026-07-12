@@ -641,3 +641,11 @@ main {
   gap: 10px;
   margin-top: 20px;
 }
+
+.app-title { display: flex; flex-direction: column; }
+.app-subtitle {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.2;
+}

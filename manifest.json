@@ -1,7 +1,7 @@
 {
-  "name": "העוזרת",
-  "short_name": "העוזרת",
-  "description": "עוזרת קולית לניהול פגישות וטיפולים",
+  "name": "המזכירה האוטומטית של משחקי הקצב",
+  "short_name": "משחקי הקצב",
+  "description": "מזכירה אוטומטית קולית - משחקי הקצב",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
