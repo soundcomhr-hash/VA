@@ -467,10 +467,19 @@ function buildQuestion_(needDay, needTime, needPlace) {
 // is for canonical names, not a gate that blocks ad-hoc locations.
 function extractInlinePlace_(text) {
   var m = text.match(/מקום\s+(.+)$/);
-  if (m) return m[1].trim();
-  m = text.match(/(אצל\S*(?:\s+\S+)*)$/);
-  if (m) return m[1].trim();
+  if (m) return trimPlaceTail_(m[1]);
+  m = text.match(/(אצל\S*(?:\s+\S+)*)/);
+  if (m) return trimPlaceTail_(m[1]);
   return null;
+}
+
+// The place phrase may sit mid-sentence ("...אצלי בבית ברביעי ב-11"); cut it
+// where a day/time expression starts so date words don't become the "place".
+function trimPlaceTail_(s) {
+  var boundary = s.search(/\s+(ביום\s|יום\s|בשעה\s|מחרתיים|מחר|היום|ב?-?\d|ב(ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת))/);
+  if (boundary !== -1) s = s.slice(0, boundary);
+  s = s.trim();
+  return s || null;
 }
 
 function detectIntent_(text) {
@@ -1117,20 +1126,44 @@ function checkHours() {
   var start = startOfToday_();
   var sessions = CalendarApp.getDefaultCalendar().getEvents(start, addDays_(start, 1))
     .filter(function (ev) { return ev.getTitle().indexOf('🎵') === 0; });
-  if (!sessions.length) return;
 
-  var dateISO = Utilities.formatDate(start, TZ, 'yyyy-MM-dd');
-  var lines = sessions.map(function (ev) {
-    var line = '• ' + Utilities.formatDate(ev.getStartTime(), TZ, 'HH:mm') + ' — ' + ev.getTitle();
-    var place = matchFormPlace_(ev.getTitle());
-    line += '\n  📝 מילוי שעות (הכל כבר מסומן, רק ללחוץ הבא-הבא):\n  ' + hoursFormLink_(dateISO, place);
-    return line;
+  // End-of-day review: any of today's (red) tasks still open? Per Ziv - the
+  // evening email must also ask "did you finish everything?", not only hours.
+  var openTasks = tasksList_().items.filter(function (t) {
+    return t.status !== 'בוצע' && t.color === 'אדום';
   });
-  var body = 'היו לך היום ' + sessions.length + ' מפגשים:\n\n' + lines.join('\n\n') +
-    '\n\nאל תשכח למלא שעות!';
+
+  if (!sessions.length && !openTasks.length) return;
+
+  var sections = [];
+
+  if (sessions.length) {
+    var dateISO = Utilities.formatDate(start, TZ, 'yyyy-MM-dd');
+    var lines = sessions.map(function (ev) {
+      var line = '• ' + Utilities.formatDate(ev.getStartTime(), TZ, 'HH:mm') + ' — ' + ev.getTitle();
+      var place = matchFormPlace_(ev.getTitle());
+      line += '\n  📝 מילוי שעות (הכל כבר מסומן, רק ללחוץ הבא-הבא):\n  ' + hoursFormLink_(dateISO, place);
+      return line;
+    });
+    sections.push('היו לך היום ' + sessions.length + ' מפגשים:\n\n' + lines.join('\n\n') +
+      '\n\nאל תשכח למלא שעות!');
+  }
+
+  if (openTasks.length) {
+    var taskLines = openTasks.map(function (t) {
+      return '• ' + t.text + (t.dueTime ? ' (' + t.dueTime + ')' : '');
+    });
+    sections.push('סיימת הכל? נשארו ' + openTasks.length + ' משימות פתוחות מהיום:\n\n' +
+      taskLines.join('\n') +
+      '\n\nסמן אותן באפליקציה, או שהן יחכו לך מחר.');
+  } else {
+    sections.push('כל משימות היום סומנו - כל הכבוד! 🎉');
+  }
+
+  var body = sections.join('\n\n===================\n\n');
 
   MailApp.sendEmail(Session.getEffectiveUser().getEmail(),
-    '🎵 תזכורת: מילוי שעות להיום', body);
+    '🌙 סיכום סוף יום - משחקי הקצב', body);
 }
 
 function getSetting_(key) {
