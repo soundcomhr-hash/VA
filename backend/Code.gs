@@ -197,6 +197,22 @@ function capture_(body) {
     return { ok: true, kind: 'משימה', summary: 'נוסף למשימות (' + task.color + ')' };
   }
 
+  // "הפגישה עם נווה אצלי בבית" - a meeting phrase carrying ONLY a place, no
+  // day/time, almost never means a brand-new meeting (a meeting needs a time).
+  // If a matching event already exists, he means "add this place to it" - turn
+  // it into an update proposal (still shown before אשר). If nothing matches,
+  // fall through to the normal new-meeting flow that asks "מתי?".
+  if (parsed.kind === 'פגישה' && parsed.place && !parsed.dateISO && !parsed.time) {
+    var asUpdate = {
+      kind: 'עדכון', person: parsed.person,
+      place: parsed.place, placeFreeText: parsed.placeFreeText,
+      dateISO: null, time: null,
+    };
+    if (resolveTargetEvents_(asUpdate).length) {
+      parsed = asUpdate;
+    }
+  }
+
   // Cancel / move / update act on an EXISTING calendar event. Resolve the
   // target now so the inbox card can show exactly which event will change,
   // and store its id - nothing is touched until Ziv taps אשר.
