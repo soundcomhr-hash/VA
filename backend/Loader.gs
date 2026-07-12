@@ -4,13 +4,26 @@
  * This is the ONLY code that lives in Ziv's Apps Script project. On every
  * request it pulls the real backend code from the GitHub repo and runs it,
  * so pushing to GitHub updates the backend with no manual redeploys.
- * A cache-busting query param defeats GitHub's own CDN caching, so a push
- * takes effect on the very next request instead of after several minutes.
+ *
+ * Speed: the fetched code is cached for up to 6 hours, so a normal request
+ * pays ~10ms (cache read) + ~30ms (eval) instead of a ~half-second GitHub
+ * fetch every single time. To make a fresh push go live instantly, hit
+ *   <exec-url>?flush=1
+ * once - that clears the cache so the next request re-fetches the latest.
  */
 
 var CODE_URL = 'https://raw.githubusercontent.com/soundcomhr-hash/VA/main/backend/Code.gs';
+var CODE_CACHE_KEY = 'remote_code';
+var CODE_CACHE_TTL = 21600; // 6h (CacheService max)
 
-function doGet(e) { return runRemote_('doGet', [e]); }
+function doGet(e) {
+  if (e && e.parameter && e.parameter.flush) {
+    CacheService.getScriptCache().remove(CODE_CACHE_KEY);
+    return ContentService.createTextOutput(JSON.stringify({ ok: true, flushed: true }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  return runRemote_('doGet', [e]);
+}
 function doPost(e) { return runRemote_('doPost', [e]); }
 function setup() { return runRemote_('setup', []); }
 function setupTriggers() { return runRemote_('setupTriggers', []); }
@@ -26,8 +39,14 @@ function runRemote_(fnName, args) {
 }
 
 function fetchCode_() {
-  var url = CODE_URL + '?t=' + new Date().getTime();
-  return UrlFetchApp.fetch(url, { muteHttpExceptions: true }).getContentText();
+  var cache = CacheService.getScriptCache();
+  var code = cache.get(CODE_CACHE_KEY);
+  if (code) return code;
+  // Cache miss: pull fresh (query param defeats GitHub's own CDN cache).
+  code = UrlFetchApp.fetch(CODE_URL + '?t=' + new Date().getTime(),
+    { muteHttpExceptions: true }).getContentText();
+  cache.put(CODE_CACHE_KEY, code, CODE_CACHE_TTL);
+  return code;
 }
 
 // Never called. Google grants permissions by statically scanning this file's

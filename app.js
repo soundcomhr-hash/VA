@@ -95,6 +95,20 @@ async function apiPost(action, payload) {
   return res.json();
 }
 
+// ---------- Stale-while-revalidate cache ----------
+// Each screen shows its last-known data instantly from localStorage, then
+// refreshes from the server in the background. This is the standard pattern
+// (SWR / React Query) for hiding a slow backend - the user never waits on a
+// blank "loading" screen when we already have something to show.
+function cacheGet(key) {
+  try { return JSON.parse(localStorage.getItem('va_cache_' + key)); }
+  catch (e) { return null; }
+}
+function cacheSet(key, val) {
+  try { localStorage.setItem('va_cache_' + key, JSON.stringify(val)); }
+  catch (e) {}
+}
+
 // ---------- Sync queued items to the backend ----------
 let syncing = false;
 
@@ -153,25 +167,59 @@ function setTasksStatus(msg) {
   document.getElementById('tasksStatus').textContent = msg;
 }
 
+// renderedTasks is the array currently on screen - the single source of truth
+// for optimistic edits (toggle / color change mutate it and re-render at once).
+let renderedTasks = [];
+
 async function loadTasks() {
-  const list = document.getElementById('tasksList');
   if (!settings.endpoint) {
-    list.innerHTML = '';
+    document.getElementById('tasksList').innerHTML = '';
     setTasksStatus('עדיין לא הוגדר שרת (⚙ למעלה).');
     return;
   }
+  const cached = cacheGet('tasks');
+  if (cached) renderTasks(cached);        // instant, no waiting
+  else setTasksStatus('טוען...');
   if (!navigator.onLine) {
-    setTasksStatus('אין חיבור לאינטרנט - נסו שוב כשיש קליטה.');
+    if (!cached) setTasksStatus('אין חיבור לאינטרנט - נסו שוב כשיש קליטה.');
     return;
   }
-  setTasksStatus('טוען...');
   try {
     const result = await apiPost('tasks_list');
     if (!result.ok) throw new Error(result.error);
+    cacheSet('tasks', result.items);
     renderTasks(result.items);
   } catch (err) {
-    setTasksStatus('שגיאה בטעינה מהשרת. נסו לרענן.');
+    if (!cached) setTasksStatus('שגיאה בטעינה מהשרת. נסו לרענן.');
   }
+}
+
+// Optimistic: flip the UI instantly, save in the background, revert on failure.
+function toggleTaskOptimistic(item) {
+  const prev = item.status;
+  item.status = (prev === 'בוצע') ? 'פתוח' : 'בוצע';
+  renderTasks(renderedTasks);
+  apiPost('tasks_toggle', { id: item.id })
+    .then((r) => { if (!r || !r.ok) throw new Error(); cacheSet('tasks', renderedTasks); })
+    .catch(() => {
+      item.status = prev;
+      renderTasks(renderedTasks);
+      setTasksStatus('לא נשמר - בעיית חיבור. נסו שוב.');
+    });
+}
+
+function setTaskColorOptimistic(item, color) {
+  const prev = item.color;
+  if (prev === color) return;
+  item.color = color;
+  renderTasks(renderedTasks);
+  apiPost('tasks_set_color', { id: item.id, color })
+    .then((r) => { if (!r || !r.ok) throw new Error(); cacheSet('tasks', renderedTasks); })
+    .catch(() => {
+      item.color = prev;
+      renderTasks(renderedTasks);
+      setTasksStatus('לא נשמר - בעיית חיבור. נסו שוב.');
+    });
 }
 
 const TASK_COLORS = ['אדום', 'כחול', 'ירוק', 'צהוב'];
@@ -188,6 +236,7 @@ function pickCongrats() {
 }
 
 function renderTasks(items) {
+  renderedTasks = items;
   const list = document.getElementById('tasksList');
   list.innerHTML = '';
   if (!items.length) {
@@ -204,17 +253,7 @@ function renderTasks(items) {
     const check = document.createElement('button');
     check.className = 'task-check';
     check.textContent = item.status === 'בוצע' ? '✓' : '';
-    check.addEventListener('click', async () => {
-      check.disabled = true;
-      try {
-        const r = await apiPost('tasks_toggle', { id: item.id });
-        if (!r.ok) throw new Error(r.error);
-        await loadTasks();
-      } catch (e) {
-        setTasksStatus('שגיאה בעדכון. נסו שוב.');
-        check.disabled = false;
-      }
-    });
+    check.addEventListener('click', () => toggleTaskOptimistic(item));
     card.appendChild(check);
 
     const text = document.createElement('div');
@@ -229,15 +268,7 @@ function renderTasks(items) {
       const dot = document.createElement('button');
       dot.className = 'color-' + color + (color === item.color ? ' selected' : '');
       dot.title = color;
-      dot.addEventListener('click', async () => {
-        try {
-          const r = await apiPost('tasks_set_color', { id: item.id, color });
-          if (!r.ok) throw new Error(r.error);
-          await loadTasks();
-        } catch (e) {
-          setTasksStatus('שגיאה בשינוי הצבע. נסו שוב.');
-        }
-      });
+      dot.addEventListener('click', () => setTaskColorOptimistic(item, color));
       colors.appendChild(dot);
     });
     card.appendChild(colors);
@@ -276,26 +307,33 @@ function setTodayStatus(msg) {
 }
 
 async function loadToday() {
-  const list = document.getElementById('todayList');
   document.getElementById('todayTitle').textContent =
     new Date().toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
   if (!settings.endpoint) {
-    list.innerHTML = '';
+    document.getElementById('todayList').innerHTML = '';
     setTodayStatus('עדיין לא הוגדר שרת (⚙ למעלה).');
     return;
   }
+  const cached = cacheGet('today');
+  if (cached) {
+    renderToday(cached.events || []);
+    renderTodayPending(cached.pending || []);
+  } else {
+    setTodayStatus('טוען את הלו"ז...');
+  }
   if (!navigator.onLine) {
-    setTodayStatus('אין חיבור לאינטרנט - נסו שוב כשיש קליטה.');
+    if (!cached) setTodayStatus('אין חיבור לאינטרנט - נסו שוב כשיש קליטה.');
     return;
   }
-  setTodayStatus('טוען את הלו"ז...');
   try {
     const result = await apiPost('today');
     if (!result.ok) throw new Error(result.error);
-    renderToday(result.events);
-    renderTodayPending(result.pending || []);
+    const data = { events: result.events || [], pending: result.pending || [] };
+    cacheSet('today', data);
+    renderToday(data.events);
+    renderTodayPending(data.pending);
   } catch (err) {
-    setTodayStatus('שגיאה בטעינה מהיומן. נסו לרענן.');
+    if (!cached) setTodayStatus('שגיאה בטעינה מהיומן. נסו לרענן.');
   }
 }
 
@@ -378,24 +416,34 @@ function setInboxStatus(msg) {
 }
 
 async function loadInbox() {
-  const list = document.getElementById('inboxList');
   if (!settings.endpoint) {
-    list.innerHTML = '';
+    document.getElementById('inboxList').innerHTML = '';
     setInboxStatus('עדיין לא הוגדר שרת (⚙ למעלה). כשהשרת יחובר, הפריטים יופיעו כאן.');
     return;
   }
+  const cached = cacheGet('inbox');
+  if (cached) renderInbox(cached);
+  else setInboxStatus('טוען...');
   if (!navigator.onLine) {
-    setInboxStatus('אין חיבור לאינטרנט - נסו שוב כשיש קליטה.');
+    if (!cached) setInboxStatus('אין חיבור לאינטרנט - נסו שוב כשיש קליטה.');
     return;
   }
-  setInboxStatus('טוען...');
   try {
     const result = await apiPost('inbox_list');
     if (!result.ok) throw new Error(result.error);
+    cacheSet('inbox', result.items);
     renderInbox(result.items);
   } catch (err) {
-    setInboxStatus('שגיאה בטעינה מהשרת. נסו לרענן.');
+    if (!cached) setInboxStatus('שגיאה בטעינה מהשרת. נסו לרענן.');
   }
+}
+
+// Drop a resolved card from the list instantly (after confirm/delete) instead
+// of waiting on a full server reload.
+function removeInboxLocally(id) {
+  const remaining = (cacheGet('inbox') || []).filter((it) => it.id !== id);
+  cacheSet('inbox', remaining);
+  renderInbox(remaining);
 }
 
 function renderInbox(items) {
@@ -499,7 +547,7 @@ function renderInbox(items) {
           return;
         }
         setInboxStatus(r.message || 'אושר ✓');
-        await loadInbox();
+        removeInboxLocally(item.id);
       } catch (e) {
         setInboxStatus('שגיאה באישור. נסו שוב.');
         confirmBtn.disabled = false;
@@ -516,7 +564,7 @@ function renderInbox(items) {
       try {
         const r = await apiPost('inbox_delete', { id: item.id });
         if (!r.ok) throw new Error(r.error);
-        await loadInbox();
+        removeInboxLocally(item.id);
       } catch (e) {
         setInboxStatus('שגיאה במחיקה. נסו שוב.');
         deleteBtn.disabled = false;

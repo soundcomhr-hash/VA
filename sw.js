@@ -1,4 +1,4 @@
-const CACHE_NAME = 'va-shell-v14';
+const CACHE_NAME = 'va-shell-v15';
 const SHELL_FILES = [
   './',
   './index.html',
