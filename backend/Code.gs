@@ -449,18 +449,33 @@ function pad_(n) { return (n < 10 ? '0' : '') + n; }
 // (combination approach - auto rule first, he can override by hand):
 //   אדום = due today, ירוק = sport/fun, כחול = routine, צהוב = default
 // (open, unplanned - "anything written as a task that needs doing").
+//
+// Color is NEVER frozen at creation time - it's recomputed live on every
+// list, because "due today" is a moving target (a task made yesterday for
+// "tomorrow" must turn red on its own once tomorrow arrives). Column ד
+// ("צבע ידני") only holds an explicit manual override; blank = auto.
 
-var TASKS_HEADERS = ['מזהה', 'נוצר', 'טקסט', 'צבע', 'סטטוס', 'תאריך יעד'];
+var TASKS_HEADERS = ['מזהה', 'נוצר', 'טקסט', 'צבע ידני', 'סטטוס', 'תאריך יעד', 'שעה יעד'];
 var SPORT_WORDS_ = /ספורט|כושר|חדר כושר|ריצה|לרוץ|שחייה|לשחות|יוגה|פילאטיס|אימון|לשחק|כיף|בילוי|טיול|לטייל/;
 var ROUTINE_WORDS_ = /קבוע|שגרה|כל שבוע|כל יום|כל חודש|תמיד/;
+var URGENT_WINDOW_MIN = 30;
 
 function getTasksSheet_() {
-  return getOrCreateSheet_(getSpreadsheet_(), 'משימות', TASKS_HEADERS);
+  var sheet = getOrCreateSheet_(getSpreadsheet_(), 'משימות', TASKS_HEADERS);
+  if (sheet.getLastColumn() < TASKS_HEADERS.length) {
+    // One-time migration from the old frozen-color layout: any color that
+    // was auto-assigned at creation gets cleared so it goes back to being
+    // computed live (a real manual pick would have to be re-clicked once).
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) sheet.getRange(2, 4, lastRow - 1, 1).clearContent();
+    sheet.getRange(1, 1, 1, TASKS_HEADERS.length).setValues([TASKS_HEADERS]);
+  }
+  return sheet;
 }
 
-function classifyTaskColor_(text, dateISO) {
+function classifyTaskColor_(text, dueDateISO) {
   var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
-  if (dateISO === today) return 'אדום';
+  if (dueDateISO === today) return 'אדום';
   if (SPORT_WORDS_.test(text)) return 'ירוק';
   if (ROUTINE_WORDS_.test(text)) return 'כחול';
   return 'צהוב';
@@ -469,9 +484,15 @@ function classifyTaskColor_(text, dateISO) {
 function createTask_(text, parsed) {
   var sheet = getTasksSheet_();
   var id = Utilities.getUuid();
-  var color = classifyTaskColor_(text, parsed.dateISO);
-  sheet.appendRow([id, now_(), parsed.title || text, color, 'פתוח', parsed.dateISO || '']);
-  return { id: id, color: color };
+  // Tasks are low-risk and freely editable (unlike meetings, which must
+  // never guess a date) - a bare time with no day mentioned ("לשלם ב-3")
+  // defaults to today, since that's what it means in ordinary speech.
+  var dueDate = parsed.dateISO;
+  if (!dueDate && parsed.time) {
+    dueDate = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  }
+  sheet.appendRow([id, now_(), parsed.title || text, '', 'פתוח', dueDate || '', parsed.time || '']);
+  return { id: id, color: classifyTaskColor_(text, dueDate) };
 }
 
 function findTaskRow_(sheet, id) {
@@ -485,11 +506,24 @@ function findTaskRow_(sheet, id) {
 function tasksList_() {
   var sheet = getTasksSheet_();
   var data = sheet.getDataRange().getValues();
+  var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
   var items = [];
   for (var i = 1; i < data.length; i++) {
+    var text = data[i][2];
+    var manualColor = data[i][3];
+    var dueDate = data[i][5];
+    var dueTime = data[i][6];
+    var urgent = false;
+    if (dueDate === today && dueTime) {
+      var t = String(dueTime).split(':');
+      var dueMin = parseInt(t[0], 10) * 60 + parseInt(t[1], 10);
+      urgent = (dueMin - nowMin) <= URGENT_WINDOW_MIN;
+    }
     items.push({
-      id: data[i][0], created: String(data[i][1]), text: data[i][2],
-      color: data[i][3], status: data[i][4], dueDate: data[i][5],
+      id: data[i][0], created: String(data[i][1]), text: text,
+      color: manualColor || classifyTaskColor_(text, dueDate),
+      status: data[i][4], dueDate: dueDate, dueTime: dueTime || null, urgent: urgent,
     });
   }
   items.reverse();

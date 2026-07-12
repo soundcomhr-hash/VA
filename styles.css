@@ -362,6 +362,10 @@ main {
   opacity: 0.45;
 }
 
+.task-card.urgent {
+  animation: pulse 1.4s infinite;
+}
+
 .task-card.done .task-text {
   text-decoration: line-through;
 }

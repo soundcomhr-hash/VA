@@ -197,7 +197,9 @@ function renderTasks(items) {
   setTasksStatus(items.every((i) => i.status === 'בוצע') ? pickCongrats() : '');
   items.forEach((item) => {
     const card = document.createElement('div');
-    card.className = 'task-card color-' + item.color + (item.status === 'בוצע' ? ' done' : '');
+    card.className = 'task-card color-' + item.color +
+      (item.status === 'בוצע' ? ' done' : '') +
+      (item.urgent && item.status !== 'בוצע' ? ' urgent' : '');
 
     const check = document.createElement('button');
     check.className = 'task-check';
@@ -217,7 +219,8 @@ function renderTasks(items) {
 
     const text = document.createElement('div');
     text.className = 'task-text';
-    text.textContent = item.text;
+    text.textContent = (item.urgent && item.status !== 'בוצע' ? '⏰ ' : '') +
+      item.text + (item.dueTime ? ' · ' + item.dueTime : '');
     card.appendChild(text);
 
     const colors = document.createElement('div');
