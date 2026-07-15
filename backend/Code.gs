@@ -860,8 +860,8 @@ function morningSnooze_() {
 function checkMorningEscalation() {
   var today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
   var startedAt = getSetting_('בוקר_' + today);
-  if (!startedAt) return; // בוקר טוב not pressed yet today
-  if (getSetting_('השתקה_' + today) === 'כן') return; // silenced for today
+  if (!startedAt) { logRun_('נדנוד בוקר', 'רץ ודילג - בוקר טוב לא נלחץ היום'); return; }
+  if (getSetting_('השתקה_' + today) === 'כן') { logRun_('נדנוד בוקר', 'רץ ודילג - הושתק להיום'); return; }
 
   var elapsedMs = new Date().getTime() - new Date(startedAt).getTime();
   if (elapsedMs < 2 * 60 * 60 * 1000) return;
@@ -872,6 +872,7 @@ function checkMorningEscalation() {
   if (!open.length) return;
 
   var lines = open.map(function (t) { return '• [' + t.color + '] ' + t.text; });
+  logRun_('נדנוד בוקר', 'נשלח מייל: ' + open.length + ' משימות פתוחות');
   MailApp.sendEmail(Session.getEffectiveUser().getEmail(),
     '⏰ עדיין יש משימות פתוחות',
     'משימות שעדיין לא סומנו כבוצעו:\n\n' + lines.join('\n') +
@@ -1118,10 +1119,22 @@ function matchFormPlace_(eventTitle) {
 }
 
 function checkHours() {
+  try {
+    checkHoursInner_();
+  } catch (e) {
+    logRun_('סיכום ערב', 'שגיאה: ' + e);
+    throw e;
+  }
+}
+
+function checkHoursInner_() {
   var days = String(getSetting_('ימי תזכורת שעות') || 'א,ב,ג,ד,ה')
     .split(',').map(function (s) { return s.trim(); });
   var todayLetter = HEB_DAY_LETTERS[startOfToday_().getDay()];
-  if (days.indexOf(todayLetter) === -1) return;
+  if (days.indexOf(todayLetter) === -1) {
+    logRun_('סיכום ערב', 'רץ ודילג - יום ' + todayLetter + ' לא ברשימת הימים');
+    return;
+  }
 
   var start = startOfToday_();
   var sessions = CalendarApp.getDefaultCalendar().getEvents(start, addDays_(start, 1))
@@ -1133,7 +1146,10 @@ function checkHours() {
     return t.status !== 'בוצע' && t.color === 'אדום';
   });
 
-  if (!sessions.length && !openTasks.length) return;
+  if (!sessions.length && !openTasks.length) {
+    logRun_('סיכום ערב', 'רץ ודילג - אין מפגשי 🎵 ביומן ואין משימות אדומות פתוחות');
+    return;
+  }
 
   var sections = [];
 
@@ -1164,6 +1180,18 @@ function checkHours() {
 
   MailApp.sendEmail(Session.getEffectiveUser().getEmail(),
     '🌙 סיכום סוף יום - משחקי הקצב', body);
+  logRun_('סיכום ערב', 'נשלח מייל: ' + sessions.length + ' מפגשים, ' +
+    openTasks.length + ' משימות פתוחות');
+}
+
+// Every scheduled run records what it decided in the הגדרות sheet, so a
+// silent evening is diagnosable at a glance (ran-and-skipped vs never-ran
+// vs crashed) without digging through Apps Script execution logs.
+function logRun_(name, outcome) {
+  try {
+    var settings = getOrCreateSheet_(getSpreadsheet_(), 'הגדרות', ['מפתח', 'ערך']);
+    upsertSetting_(settings, 'ריצה אחרונה - ' + name, now_() + ' · ' + outcome);
+  } catch (e) { /* logging must never break the run itself */ }
 }
 
 function getSetting_(key) {
