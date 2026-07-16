@@ -17,6 +17,20 @@ var TZ = 'Asia/Jerusalem';
 var SPREADSHEET_NAME = 'העוזרת - נתונים';
 var AUDIO_FOLDER_NAME = 'העוזרת - הקלטות';
 
+// Single point of calendar access. In the PERSONAL app (העוזרת) no CALENDAR_ID
+// property is set, so this is Ziv's default calendar - unchanged behavior. In the
+// המזכיר (business) clone, set Script Property 'CALENDAR_ID' to a DEDICATED
+// business calendar; the code then never has a handle to Ziv's personal calendar
+// (calendar isolation - see CRM/המזכיר.md). Zero code change in the clone.
+function getCal_() {
+  var id = PropertiesService.getScriptProperties().getProperty('CALENDAR_ID');
+  if (id) {
+    var cal = CalendarApp.getCalendarById(id);
+    if (cal) return cal;
+  }
+  return CalendarApp.getDefaultCalendar();
+}
+
 // ---------------------------------------------------------------- setup ----
 
 function setup() {
@@ -321,7 +335,7 @@ function resolveTargetEvents_(parsed) {
 
   var start = new Date();
   var horizon = addDays_(startOfToday_(), 60);
-  var events = CalendarApp.getDefaultCalendar().getEvents(start, horizon);
+  var events = getCal_().getEvents(start, horizon);
   var matches = events.filter(function (ev) {
     var title = ev.getTitle();
     for (var i = 0; i < terms.length; i++) {
@@ -396,7 +410,7 @@ function confirmCalendarEdit_(data) {
     return { ok: false, error: 'no-target', question: 'לא נמצא אירוע - מחקו ונסו שוב עם יום מדויק.' };
   }
   var ev = null;
-  try { ev = CalendarApp.getDefaultCalendar().getEventById(data.eventId); } catch (e) {}
+  try { ev = getCal_().getEventById(data.eventId); } catch (e) {}
   if (!ev) return { ok: false, error: 'event-gone', question: 'האירוע כבר לא קיים ביומן.' };
   var title = ev.getTitle();
 
@@ -749,7 +763,7 @@ function createTask_(text, parsed) {
 function createTaskCalendarEvent_(title, dueDateISO, dueTime) {
   var p = dueDateISO.split('-');
   var y = parseInt(p[0], 10), m = parseInt(p[1], 10) - 1, d = parseInt(p[2], 10);
-  var cal = CalendarApp.getDefaultCalendar();
+  var cal = getCal_();
   if (dueTime) {
     var t = dueTime.split(':');
     var start = new Date(y, m, d, parseInt(t[0], 10), parseInt(t[1], 10));
@@ -1000,7 +1014,7 @@ function inboxConfirm_(id) {
     var start = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10),
                          parseInt(t[0], 10), parseInt(t[1], 10));
     var end = new Date(start.getTime() + 60 * 60 * 1000);
-    var event = CalendarApp.getDefaultCalendar().createEvent(parsed.title, start, end, {
+    var event = getCal_().createEvent(parsed.title, start, end, {
       location: parsed.place || '',
       description: 'נוצר על ידי העוזרת מתוך: "' + (parsed.text || '') + '"',
     });
@@ -1034,7 +1048,7 @@ function confirmInventory_(parsed) {
   var afterGive = adjustInventory_(parsed.item, -qty);
   logEquipmentOut_(parsed.item, qty, parsed.person);
   var when = addDays_(startOfToday_(), 7);
-  var ev = CalendarApp.getDefaultCalendar().createAllDayEvent(
+  var ev = getCal_().createAllDayEvent(
     '🔧 לבדוק ציוד אצל ' + parsed.person + ' (' + parsed.item + ')', when);
   ev.addPopupReminder(0);
   return {
@@ -1137,7 +1151,7 @@ function checkHoursInner_() {
   }
 
   var start = startOfToday_();
-  var sessions = CalendarApp.getDefaultCalendar().getEvents(start, addDays_(start, 1))
+  var sessions = getCal_().getEvents(start, addDays_(start, 1))
     .filter(function (ev) { return ev.getTitle().indexOf('🎵') === 0; });
 
   // End-of-day review: any of today's (red) tasks still open? Per Ziv - the
@@ -1209,7 +1223,7 @@ function getSetting_(key) {
 function today_() {
   var start = startOfToday_();
   var end = addDays_(start, 1);
-  var events = CalendarApp.getDefaultCalendar().getEvents(start, end).map(function (ev) {
+  var events = getCal_().getEvents(start, end).map(function (ev) {
     return {
       title: ev.getTitle(),
       start: Utilities.formatDate(ev.getStartTime(), TZ, 'HH:mm'),
