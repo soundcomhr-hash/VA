@@ -887,7 +887,7 @@ function checkMorningEscalation() {
 
   var lines = open.map(function (t) { return '• [' + t.color + '] ' + t.text; });
   logRun_('נדנוד בוקר', 'נשלח מייל: ' + open.length + ' משימות פתוחות');
-  MailApp.sendEmail(Session.getEffectiveUser().getEmail(),
+  MailApp.sendEmail(ownerEmail_(),
     '⏰ עדיין יש משימות פתוחות',
     'משימות שעדיין לא סומנו כבוצעו:\n\n' + lines.join('\n') +
     '\n\nלהפסיק את התזכורות להיום: פתח את העוזרת, לשונית משימות, "השתק להיום".');
@@ -1196,7 +1196,7 @@ function checkHoursInner_() {
 
   var body = sections.join('\n\n===================\n\n');
 
-  MailApp.sendEmail(Session.getEffectiveUser().getEmail(),
+  MailApp.sendEmail(ownerEmail_(),
     '🌙 סיכום סוף יום - משחקי הקצב', body);
   logRun_('סיכום ערב', 'נשלח מייל: ' + sessions.length + ' מפגשים, ' +
     openTasks.length + ' משימות פתוחות');
@@ -1304,7 +1304,7 @@ function checkInvoicesInner_() {
     return;
   }
 
-  MailApp.sendEmail(Session.getEffectiveUser().getEmail(),
+  MailApp.sendEmail(ownerEmail_(),
     '💸 חסרים ' + gaps.length + ' חשבונות עסקה', invoiceMailBody_(gaps, throughMonth));
   logRun_('חשבונות עסקה', 'נשלח מייל: ' + gaps.length + ' חוסרים עד ' +
     MONTH_NAMES[throughMonth]);
@@ -1377,4 +1377,21 @@ function invoiceMailBody_(gaps, throughMonth) {
     'לא רלוונטי? לסמן sent=NOT RELEVENT — והשורה לא תוזכר יותר.\n\n' +
     'התזכורת הזו חוזרת כל 3 ימים עד שלא נשאר אף חוסר עד ' +
     MONTH_NAMES[throughMonth] + '.';
+}
+
+// Google decides which scopes to request by statically scanning the loader
+// file, and it cannot see through the eval that pulls this file in — so
+// Session.getEffectiveUser() is never authorized here, and every call to it
+// throws at runtime. Read the address from Script Properties instead, and
+// only fall back to Session where the scope happens to exist. Every reminder
+// in this file routes through here: if the address cannot be resolved, the
+// failure is one loud message rather than three silent ones.
+function ownerEmail_() {
+  var stored = PropertiesService.getScriptProperties().getProperty('OWNER_EMAIL');
+  if (stored) return String(stored).trim();
+  try {
+    return Session.getEffectiveUser().getEmail();
+  } catch (e) {
+    throw new Error('חסר OWNER_EMAIL ב-Script Properties — בלעדיו אין לאן לשלוח תזכורות');
+  }
 }
