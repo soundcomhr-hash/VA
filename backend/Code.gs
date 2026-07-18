@@ -1087,13 +1087,17 @@ function logEquipmentOut_(item, qty, person) {
 function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     var fn = t.getHandlerFunction();
-    if (fn === 'checkHours' || fn === 'checkMorningEscalation') ScriptApp.deleteTrigger(t);
+    if (fn === 'checkHours' || fn === 'checkMorningEscalation' ||
+        fn === 'checkInvoices') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('checkHours')
     .timeBased().everyDays(1).atHour(19).nearMinute(30).inTimezone(TZ)
     .create();
   ScriptApp.newTrigger('checkMorningEscalation')
     .timeBased().everyHours(1).inTimezone(TZ)
+    .create();
+  ScriptApp.newTrigger('checkInvoices')
+    .timeBased().everyDays(3).atHour(9).inTimezone(TZ)
     .create();
 
   var settings = getOrCreateSheet_(getSpreadsheet_(), 'הגדרות', ['מפתח', 'ערך']);
@@ -1237,4 +1241,140 @@ function today_() {
   // quietly forgotten in a tab he doesn't open.
   var pending = inboxList_().items;
   return { ok: true, events: events, pending: pending };
+}
+
+// -------------------------------------------------------------- invoices ----
+// "המציק החודשי" — the money loop's watchdog. Every few days it asks Airtable
+// which already-closed rows still have no invoice number or were never sent,
+// and mails Ziv the list. Silence means everything is done: the nag stops on
+// its own, so a quiet inbox is proof rather than a suspicion.
+//
+// Scope is "every month up to and including last month", not just last month —
+// a row forgotten in June must not fall through the cracks once July opens.
+//
+// Escape hatch (per Ziv): set the row's sent = NOT RELEVENT in Airtable and it
+// is never mentioned again. That is the only way to silence a row without
+// filling it, so nothing is ever dismissed by accident.
+//
+// Money data belongs to העוזרת alone (the teachers' המזכיר never sees it) —
+// this whole section is the reason that separation exists.
+
+var AIRTABLE = {
+  base: 'appk9SzeMZ8bOpdiX',
+  table: 'tblFvBi8QaB2hj49n',
+  month: 'M',
+  sum: 'SUM',
+  inv: 'inv',
+  sent: 'sent',
+  place: 'place',
+  cus: 'cus',
+  skipValue: 'NOT RELEVENT',
+};
+
+var MONTH_NAMES = ['', 'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+  'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+
+function checkInvoices() {
+  try {
+    checkInvoicesInner_();
+  } catch (e) {
+    logRun_('חשבונות עסקה', 'שגיאה: ' + e);
+    throw e;
+  }
+}
+
+function checkInvoicesInner_() {
+  var token = PropertiesService.getScriptProperties().getProperty('AIRTABLE_TOKEN');
+  if (!token) {
+    logRun_('חשבונות עסקה', 'שגיאה: חסר AIRTABLE_TOKEN בהגדרות הסקריפט');
+    return;
+  }
+
+  // Only months that have actually closed can be judged incomplete.
+  var throughMonth = startOfToday_().getMonth(); // 0-based now = last month 1-based
+  if (throughMonth < 1) {
+    logRun_('חשבונות עסקה', 'רץ ודילג - ינואר, אין עדיין חודש סגור');
+    return;
+  }
+
+  var gaps = invoiceGaps_(fetchAirtableRows_(token), throughMonth);
+
+  if (!gaps.length) {
+    logRun_('חשבונות עסקה', 'רץ ודילג - הכל סגור עד ' + MONTH_NAMES[throughMonth]);
+    return;
+  }
+
+  MailApp.sendEmail(Session.getEffectiveUser().getEmail(),
+    '💸 חסרים ' + gaps.length + ' חשבונות עסקה', invoiceMailBody_(gaps, throughMonth));
+  logRun_('חשבונות עסקה', 'נשלח מייל: ' + gaps.length + ' חוסרים עד ' +
+    MONTH_NAMES[throughMonth]);
+}
+
+function fetchAirtableRows_(token) {
+  var url = 'https://api.airtable.com/v0/' + AIRTABLE.base + '/' + AIRTABLE.table;
+  var rows = [];
+  var offset = '';
+  do {
+    var res = UrlFetchApp.fetch(url + '?pageSize=100' + (offset ? '&offset=' + offset : ''), {
+      headers: { Authorization: 'Bearer ' + token },
+      muteHttpExceptions: true,
+    });
+    if (res.getResponseCode() !== 200) {
+      throw new Error('Airtable ' + res.getResponseCode() + ': ' +
+        res.getContentText().slice(0, 200));
+    }
+    var body = JSON.parse(res.getContentText());
+    rows = rows.concat(body.records || []);
+    offset = body.offset || '';
+  } while (offset);
+  return rows;
+}
+
+function invoiceGaps_(records, throughMonth) {
+  var gaps = [];
+  for (var i = 0; i < records.length; i++) {
+    var f = records[i].fields || {};
+    var month = Number(f[AIRTABLE.month]);
+    if (!month || month > throughMonth) continue;      // future or unfiled
+    if (!f[AIRTABLE.sum]) continue;                     // nothing billable yet
+    if (f[AIRTABLE.sent] === AIRTABLE.skipValue) continue; // Ziv silenced it
+
+    var noInvoice = !String(f[AIRTABLE.inv] || '').trim();
+    var notSent = f[AIRTABLE.sent] !== 'yes';
+    if (!noInvoice && !notSent) continue;               // fully done
+
+    gaps.push({
+      month: month,
+      name: f[AIRTABLE.place] || f[AIRTABLE.cus] || '(ללא שם)',
+      sum: f[AIRTABLE.sum],
+      missing: noInvoice && notSent ? 'אין מספר חשבון, לא נשלח'
+        : (noInvoice ? 'אין מספר חשבון' : 'לא נשלח'),
+    });
+  }
+  gaps.sort(function (a, b) {
+    return a.month - b.month || String(a.name).localeCompare(String(b.name));
+  });
+  return gaps;
+}
+
+function invoiceMailBody_(gaps, throughMonth) {
+  var lines = [];
+  var currentMonth = null;
+  var total = 0;
+  for (var i = 0; i < gaps.length; i++) {
+    if (gaps[i].month !== currentMonth) {
+      currentMonth = gaps[i].month;
+      lines.push('\n📅 ' + MONTH_NAMES[currentMonth] + ':');
+    }
+    lines.push('• ' + gaps[i].name + ' — ' + gaps[i].sum + ' ₪  (' + gaps[i].missing + ')');
+    total += Number(gaps[i].sum) || 0;
+  }
+
+  return 'עדיין פתוחים ' + gaps.length + ' חשבונות עסקה, בסך ' + total + ' ₪:\n' +
+    lines.join('\n') +
+    '\n\n===================\n\n' +
+    'מה לעשות: למלא בטבלה "מעקב תשלומים 2026" את מספר החשבון (inv) ולסמן sent=yes.\n' +
+    'לא רלוונטי? לסמן sent=NOT RELEVENT — והשורה לא תוזכר יותר.\n\n' +
+    'התזכורת הזו חוזרת כל 3 ימים עד שלא נשאר אף חוסר עד ' +
+    MONTH_NAMES[throughMonth] + '.';
 }
